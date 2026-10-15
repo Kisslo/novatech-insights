@@ -1,4 +1,11 @@
 name,feed_url,language
 n8n Blog,https://blog.n8n.io/rss/,en
 TechCrunch,https://techcrunch.com/feed/,en
-Breakit,https://www.breakit.se/feed/artiklar
+Breakit,https://www.breakit.se/feed/artiklar/,sv
+Tech.eu,https://tech.eu/feed/,en
+Ars Technica,https://feeds.arstechnica.com/arstechnica/index,en
+WIRED,https://www.wired.com/feed/rss,en
+The Register,https://www.theregister.com/headlines.rss,en
+BleepingComputer,https://www.bleepingcomputer.com/feed/,en
+Forskning.se,https://www.forskning.se/feed/,sv
+SweClockers,https://www.sweclockers.com/feeds/nyheter,sv

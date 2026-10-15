@@ -1,0 +1,15 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Local Python virtual environment
+.venv/
+
+# Generated Python bytecode
+__pycache__/
+*.py[cod]
+
+# Local tool caches
+.ruff_cache/
+.pytest_cache/

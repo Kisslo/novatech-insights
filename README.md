@@ -31,7 +31,8 @@ perspective.
 
 ## Requirements and Constraints
 
-- Source text must not be copied into the system.
+- RSS descriptions may be stored as agreed by the team.
+  Other source article text must not be copied into the system.
 - LinkedIn must not be read automatically.
 - Topic or genre information must be considered when defining
   the news data structure, based on Kisslo's feedback.
@@ -251,11 +252,20 @@ Results are saved to `data/news.csv`.
 Change `MAX_AGE_DAYS` in `src/collect_news.py` to adjust
 the time window.
 
-Output columns: `title`, `link`, `source`, `published`, `subject`.
+Output columns: `title`, `link`, `source`, `published`, `subject`, `description`.
 
 The current collector uses `published` for the publication date;
 the proposed grouping fields above call it `publication_date`.
 The shared field name still needs to be agreed.
 
 The `subject` field is currently left blank for new articles.
-RSS descriptions and full article text are not collected.
+The collector saves the RSS feed's `description` as plain text,
+with HTML formatting removed and whitespace normalized.
+Missing descriptions are saved as empty values.
+
+Existing articles with empty descriptions are updated when they
+are still available in the feed. Existing subjects are preserved.
+
+Descriptions are supplied by publishers, not generated or verified
+by our system. Their length varies, and the collector does not
+shorten them or fetch article pages.

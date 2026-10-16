@@ -125,10 +125,25 @@ the system's final analysis method.
 - Shared Python version and dependency management.
 - Target environment for deployment and ongoing maintenance.
 
-## Development
+### Code Quality
 
-The project uses uv for Python environment and dependency management.
-The development Python version is specified in `.python-version`.
+Ruff linting and formatting rules are configured in `pyproject.toml`.
+
+Run these checks from the repository root:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+```
+
+These commands check the code without modifying files.
+To apply formatting, run:
+
+```bash
+uv run ruff format .
+```
+
+Automated tests and CI checks have not yet been configured.
 
 ### Local Setup
 

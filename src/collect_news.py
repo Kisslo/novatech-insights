@@ -4,12 +4,13 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from html.parser import HTMLParser
 
 FOLDER = Path(__file__).resolve().parent.parent / "data"
 SOURCES_FILE = FOLDER / "sources.csv"
 OUTPUT_FILE = FOLDER / "news.csv"
 
-FIELDS = ["title", "link", "source", "published", "subject"]
+FIELDS = ["title", "link", "source", "published", "subject", "description"]
 
 # Change this number if the team wants a different time window.
 MAX_AGE_DAYS = 7
@@ -43,7 +44,22 @@ def parse_date(value):
 def format_date(date):
     """Save a consistent ISO 8601 timestamp in UTC."""
     return date.isoformat(timespec="seconds").replace("+00:00", "Z")
+class DescriptionParser(HTMLParser):
+    """Extract plain text from an RSS description."""
 
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def clean_description(value):
+    parser = DescriptionParser()
+    parser.feed(value or "")
+    parser.close()
+    return " ".join(" ".join(parser.parts).split())
 
 articles = {}
 removed_existing = 0
@@ -70,6 +86,7 @@ if OUTPUT_FILE.exists():
                 "source": row.get("source") or "",
                 "published": format_date(date),
                 "subject": row.get("subject") or "",
+                "description": row.get("description") or "",
             }
 
 # Load the source list.
@@ -105,15 +122,29 @@ for source in sources:
         print("Skipped: this feed is not in the supported RSS format.")
         continue
 
-    new_count = 0
+        new_count = 0
     skipped_dates = 0
-
+    descriptions_added = 0
+    Pnew_count = 0
+    skipped_dates = 0
+    descriptions_added = 0
     for item in channel.findall("item"):
         title = item.findtext("title", default="").strip()
         link = item.findtext("link", default="").strip()
         published = item.findtext("pubDate", default="").strip()
+        description = clean_description(
+            item.findtext("description", default="")
+        )
 
-        if not title or not link or link in articles:
+        if not title or not link:
+            continue
+
+        # Fill missing descriptions without adding duplicate articles.
+        # Preserve the existing title, date, source and subject.
+        if link in articles:
+            if description and not articles[link].get("description"):
+                articles[link]["description"] = description
+                descriptions_added += 1
             continue
 
         date = parse_date(published)
@@ -128,13 +159,14 @@ for source in sources:
             "source": name,
             "published": format_date(date),
             "subject": "",
+            "description": description,
         }
         new_count += 1
 
     total_new += new_count
     print(f"New articles: {new_count}")
+    print(f"Existing articles given descriptions: {descriptions_added}")
     print(f"Skipped because of date: {skipped_dates}")
-
 # Sort newest first and save through a temporary file.
 sorted_articles = sorted(
     articles.values(),

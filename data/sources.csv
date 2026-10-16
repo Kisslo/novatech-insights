@@ -1,0 +1,4 @@
+name,feed_url,language
+n8n Blog,https://blog.n8n.io/rss/,en
+TechCrunch,https://techcrunch.com/feed/,en
+Breakit,https://www.breakit.se/feed/artiklar

@@ -1,20 +1,23 @@
 import csv
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
+from http.client import HTTPException
 from pathlib import Path
+from urllib.error import URLError
 
 FOLDER = Path(__file__).resolve().parent.parent / "data"
 SOURCES_FILE = FOLDER / "sources.csv"
 OUTPUT_FILE = FOLDER / "news.csv"
 
-FIELDS = ["title", "link", "source", "published", "subject"]
+FIELDS = ["title", "link", "source", "published", "subject", "description"]
 
 # Change this number if the team wants a different time window.
 MAX_AGE_DAYS = 7
 
-now = datetime.now(timezone.utc)
+now = datetime.now(UTC)
 cutoff = now - timedelta(days=MAX_AGE_DAYS)
 
 
@@ -27,22 +30,41 @@ def parse_date(value):
 
     try:
         date = parsedate_to_datetime(value)
-    except (ValueError, TypeError, OverflowError):
+    except ValueError, TypeError, OverflowError:
         try:
-            date = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except (ValueError, TypeError, OverflowError):
+            date = datetime.fromisoformat(value)
+        except ValueError, TypeError, OverflowError:
             return None
 
     # Do not guess the timezone when it is missing.
     if date.tzinfo is None:
         return None
 
-    return date.astimezone(timezone.utc)
+    return date.astimezone(UTC)
 
 
 def format_date(date):
     """Save a consistent ISO 8601 timestamp in UTC."""
     return date.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+class DescriptionParser(HTMLParser):
+    """Extract plain text from an RSS description."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def clean_description(value):
+    """Remove HTML formatting and normalize whitespace."""
+    parser = DescriptionParser()
+    parser.feed(value or "")
+    parser.close()
+    return " ".join(" ".join(parser.parts).split())
 
 
 articles = {}
@@ -70,6 +92,7 @@ if OUTPUT_FILE.exists():
                 "source": row.get("source") or "",
                 "published": format_date(date),
                 "subject": row.get("subject") or "",
+                "description": row.get("description") or "",
             }
 
 # Load the source list.
@@ -95,7 +118,7 @@ for source in sources:
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             root = ET.fromstring(response.read())
-    except Exception as error:
+    except (URLError, OSError, HTTPException, ET.ParseError) as error:
         print(f"Could not read {name}: {error}")
         continue
 
@@ -107,13 +130,23 @@ for source in sources:
 
     new_count = 0
     skipped_dates = 0
+    descriptions_added = 0
 
     for item in channel.findall("item"):
         title = item.findtext("title", default="").strip()
         link = item.findtext("link", default="").strip()
         published = item.findtext("pubDate", default="").strip()
+        description = clean_description(item.findtext("description", default=""))
 
-        if not title or not link or link in articles:
+        if not title or not link:
+            continue
+
+        # Fill missing descriptions without adding duplicate articles.
+        # Preserve the existing title, date, source and subject.
+        if link in articles:
+            if description and not articles[link].get("description"):
+                articles[link]["description"] = description
+                descriptions_added += 1
             continue
 
         date = parse_date(published)
@@ -128,11 +161,13 @@ for source in sources:
             "source": name,
             "published": format_date(date),
             "subject": "",
+            "description": description,
         }
         new_count += 1
 
     total_new += new_count
     print(f"New articles: {new_count}")
+    print(f"Existing articles given descriptions: {descriptions_added}")
     print(f"Skipped because of date: {skipped_dates}")
 
 # Sort newest first and save through a temporary file.

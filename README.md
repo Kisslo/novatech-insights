@@ -145,7 +145,18 @@ To apply formatting, run:
 uv run ruff format .
 ```
 
-Automated tests and CI checks have not yet been configured.
+### Tests
+
+Run the tests from the repository root:
+
+```bash
+uv run python -m pytest
+```
+
+The tests cover date parsing, date formatting, and RSS description
+cleaning. They do not make network requests or connect to a database.
+
+CI checks have not yet been configured..
 
 ### Local Setup
 

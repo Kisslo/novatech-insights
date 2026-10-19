@@ -156,7 +156,21 @@ uv run python -m pytest
 The tests cover date parsing, date formatting, and RSS description
 cleaning. They do not make network requests or connect to a database.
 
-CI checks have not yet been configured..
+### Continuous Integration
+
+The GitHub Actions workflow in `.github/workflows/ci.yml` runs on pull
+requests targeting `main` and on pushes to `main`. It also supports
+manual runs.
+
+CI installs dependencies from `uv.lock` and runs:
+
+```bash
+uv run --locked ruff check .
+uv run --locked python -m pytest
+```
+
+Formatting is checked locally using the command in the Code Quality
+section; it is not currently checked in CI.
 
 ### Local Setup
 

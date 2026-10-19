@@ -157,7 +157,10 @@ Manual activation of `.venv` is not required.
 ### Environment Configuration
 
 `.env.example` documents the available configuration variables.
-No configuration variables have been defined yet.
+Supabase storage uses SUPABASE_URL and SUPABASE_KEY.
+Set SUPABASE_URL to the project base URL, without /rest/v1.
+Set SUPABASE_KEY to a secret API key for backend use only.
+Keep real credentials in the ignored .env file.
 
 When local configuration is needed, copy the template:
 
@@ -173,7 +176,7 @@ only safe placeholders and documentation.
 
 ### Dependencies
 
-Declare runtime dependencies in `pyproject.toml` using:
+Declare runtime dependencies in `pyproject.toml` usiNo conng:
 
 ```bash
 uv add <package>
@@ -269,3 +272,38 @@ are still available in the feed. Existing subjects are preserved.
 Descriptions are supplied by publishers, not generated or verified
 by our system. Their length varies, and the collector does not
 shorten them or fetch article pages.
+## Supabase News Storage
+
+Validate the collected CSV without changing local or remote data:
+
+```powershell
+uv run python src/store_news.py
+```
+
+Upload valid articles to the `public.news` table:
+
+```powershell
+uv run python src/store_news.py --upload
+```
+
+The uploader:
+- Reads `data/news.csv`.
+- Requires title, link, source, and a valid publication timestamp.
+- Accepts only timezone-aware dates within the last seven days.
+- Converts publication timestamps to UTC.
+- Removes duplicate links from the upload input.
+- Uploads in batches of up to 100 articles through the REST API.
+- Skips links already stored in Supabase without updating their fields.
+- Reports inserted articles and skipped existing links.
+- Leaves the CSV and the separate `news_articles` table unchanged.
+
+The database generates `id` and `collected_at`.
+A unique constraint on `link` prevents duplicate articles.
+Row Level Security is enabled. The backend secret key bypasses RLS
+and must never be included in frontend code or committed to Git.
+
+The seven-day filter applies to upload input. Previously uploaded
+articles are not automatically deleted when they become older.
+
+If an upload fails, earlier batches may already be saved.
+Rerunning the command skips existing links.

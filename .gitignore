@@ -1,0 +1,11 @@
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Generated topic grouping files
+data/news_with_metadata.csv
+data/news_with_topics.csv
+data/news_with_topics_backup.csv

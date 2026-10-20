@@ -13,3 +13,6 @@ __pycache__/
 # Local tool caches
 .ruff_cache/
 .pytest_cache/
+
+# Generated content output
+output/

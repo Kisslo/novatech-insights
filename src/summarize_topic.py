@@ -45,7 +45,7 @@ import sys
 import threading
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -179,6 +179,19 @@ def parse_rows(rows: str) -> list[int]:
     return numbers
 
 
+def sort_newest_first(articles: list[dict]) -> list[dict]:
+    """Sort by the published date, newest first. Missing or invalid dates go last."""
+
+    def published(article: dict) -> datetime:
+        try:
+            date = datetime.fromisoformat(article.get("published", ""))
+        except ValueError:
+            return datetime.min.replace(tzinfo=UTC)
+        return date if date.tzinfo else date.replace(tzinfo=UTC)
+
+    return sorted(articles, key=published, reverse=True)
+
+
 def select_articles(
     articles: list[dict],
     subject: str | None,
@@ -196,7 +209,7 @@ def select_articles(
             print(f"Warning: rows {missing} do not exist (0–{len(articles) - 1}).")
         selected = [articles[i] for i in rows if 0 <= i < len(articles)]
     else:
-        selected = articles
+        selected = sort_newest_first(articles)
         if subject:
             selected = [
                 a for a in selected if a.get("subject", "").lower() == subject.lower()
@@ -479,10 +492,19 @@ def check_source_links(summary: str, articles: list[dict]) -> list[str]:
 # ---------------------------------------------------------------- Claude
 
 
-def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Cost in USD for a given number of tokens."""
-    price_in, price_out = PRICES_PER_MTOK.get(model, (0.0, 0.0))
+def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float | None:
+    """Cost in USD for a given number of tokens, or None if the price is unknown."""
+    if model not in PRICES_PER_MTOK:
+        return None
+    price_in, price_out = PRICES_PER_MTOK[model]
     return (input_tokens * price_in + output_tokens * price_out) / 1_000_000
+
+
+def format_cost(cost: float | None) -> str:
+    """Show a cost as '$0.0140', or say that it is unknown."""
+    if cost is None:
+        return "unknown (model not in PRICES_PER_MTOK)"
+    return f"${cost:.4f}"
 
 
 def call_claude(model: str, prompt: str, effort: str) -> tuple[str, int, int]:
@@ -523,11 +545,11 @@ def call_claude(model: str, prompt: str, effort: str) -> tuple[str, int, int]:
     return text, response.usage.input_tokens, response.usage.output_tokens
 
 
-def save_summary(text: str, model: str, cost: float) -> Path:
+def save_summary(text: str, model: str, cost: float | None) -> Path:
     """Save the summary as a Markdown file in output/summaries/."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUTPUT_DIR / f"summary_{datetime.now().astimezone():%Y%m%d_%H%M%S}.md"
-    header = f"<!-- model: {model} | cost: ${cost:.4f} -->\n\n"
+    header = f"<!-- model: {model} | cost: {format_cost(cost)} -->\n\n"
     path.write_text(header + text, encoding="utf-8")
     return path
 
@@ -603,17 +625,22 @@ def main() -> None:
     prompt = build_prompt(articles, args.fetch)
 
     if args.dry_run:
+        print("\n--- System prompt ---")
+        print(SYSTEM_PROMPT)
+        print("\n--- Prompt ---")
+        print(prompt)
+        print("--- End of prompt ---\n")
         # Rough estimate: about 4 characters per token.
         est_input = (len(SYSTEM_PROMPT) + len(prompt)) // 4
         max_cost = estimate_cost(model, est_input, MAX_OUTPUT_TOKENS)
         print(f"Estimated input tokens: ~{est_input}")
-        print(f"Max cost for this call: ~${max_cost:.4f}")
+        print(f"Max cost for this call: ~{format_cost(max_cost)}")
         print("Dry run: no call to Claude made.")
         return
 
     text, tokens_in, tokens_out = call_claude(model, prompt, effort)
     cost = estimate_cost(model, tokens_in, tokens_out)
-    print(f"Tokens: {tokens_in} in / {tokens_out} out | Cost: ${cost:.4f}")
+    print(f"Tokens: {tokens_in} in / {tokens_out} out | Cost: {format_cost(cost)}")
     if not text:
         sys.exit("No summary was written, so nothing was saved.")
 

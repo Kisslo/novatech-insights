@@ -4,10 +4,14 @@ from src.summarize_topic import (
     build_prompt,
     check_source_links,
     detect_paywall,
+    estimate_cost,
+    format_cost,
+    main,
     parse_rows,
     paywall_from_json_ld,
     paywall_from_meta,
     select_articles,
+    sort_newest_first,
 )
 
 
@@ -241,3 +245,78 @@ def test_check_source_links_finds_invented_and_missing_links():
 
     assert any("invented.com/x" in w and "not in the sources" in w for w in warnings)
     assert any("b.se/2" in w and "missing" in w for w in warnings)
+
+
+# ---------------------------------------------------------------- review fixes
+
+
+def test_sort_newest_first_handles_missing_and_naive_dates():
+    articles = [
+        {"link": "old", "published": "2026-10-14T08:00:00Z"},
+        {"link": "missing", "published": ""},
+        {"link": "new", "published": "2026-10-20T08:00:00Z"},
+        {"link": "naive", "published": "2026-10-17T08:00:00"},
+        {"link": "invalid", "published": "yesterday"},
+    ]
+
+    result = [a["link"] for a in sort_newest_first(articles)]
+
+    assert result[:3] == ["new", "naive", "old"]
+    assert set(result[3:]) == {"missing", "invalid"}
+
+
+def test_select_without_filter_takes_newest_not_first_rows():
+    articles = [
+        {"link": "https://a.se/old", "published": "2026-10-14T08:00:00Z"},
+        {"link": "https://a.se/new", "published": "2026-10-20T08:00:00Z"},
+    ]
+
+    selected = select_articles(articles, None, None, None, 1)
+
+    assert selected[0]["link"] == "https://a.se/new"
+
+
+def test_select_by_rows_keeps_given_order():
+    articles = [
+        {"link": "https://a.se/old", "published": "2026-10-14T08:00:00Z"},
+        {"link": "https://a.se/new", "published": "2026-10-20T08:00:00Z"},
+    ]
+
+    selected = select_articles(articles, None, None, [0, 1], None)
+
+    assert [a["link"] for a in selected] == ["https://a.se/old", "https://a.se/new"]
+
+
+def test_estimate_cost_unknown_model_is_none():
+    assert estimate_cost("unknown-model", 1000, 1000) is None
+
+
+def test_estimate_cost_known_model():
+    assert estimate_cost("claude-sonnet-5-5", 1_000_000, 0) == 2.0
+
+
+@pytest.mark.parametrize(
+    ("cost", "expected"),
+    [(0.014, "$0.0140"), (0.0, "$0.0000"), (None, "unknown")],
+)
+def test_format_cost(cost, expected):
+    assert format_cost(cost).startswith(expected)
+
+
+def test_dry_run_prints_prompt(tmp_path, monkeypatch, capsys):
+    csv_path = tmp_path / "news.csv"
+    csv_path.write_text(
+        "title,link,source,published,subject,description\n"
+        "Agent news,https://a.se/1,Source,2026-10-20T08:00:00Z,,A description\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["summarize_topic.py", "--csv", str(csv_path), "--dry-run"]
+    )
+
+    main()
+
+    out = capsys.readouterr().out
+    assert "--- Prompt ---" in out
+    assert "Title: Agent news" in out
+    assert "Dry run: no call to Claude made." in out

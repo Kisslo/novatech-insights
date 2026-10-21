@@ -127,7 +127,7 @@ the system's final analysis method.
 - Shared Python version and dependency management.
 - Target environment for deployment and ongoing maintenance.
 
-### Code Quality
+## Code Quality
 
 Ruff linting and formatting rules are configured in `pyproject.toml`.
 
@@ -234,12 +234,21 @@ Verify that the tools are available in the project environment:
 
 ```bash
 uv run ruff --version
-uv run pytest --version
+uv run python -m pytest --version
 ```
 
-Both tools have been installed and verified locally.
-Linting rules, formatting conventions, and automated tests
-have not yet been configured.
+Ruff linting rules are configured in `pyproject.toml`, and automated
+tests are located in `tests/`.
+
+Run the tests from the repository root:
+
+```bash
+uv run python -m pytest
+```
+
+Use `python -m pytest` rather than `pytest` directly. This adds the
+current directory to Python's import search path, allowing the tests
+to import project code such as `src.collect_news`.
 
 ## Contribution Workflow
 
@@ -251,6 +260,25 @@ have not yet been configured.
   `docs: update development instructions`.
 
 Branch protection has been requested and is pending configuration.
+
+### Tests in Pull Requests
+
+The contributor implementing a change is responsible for adding or
+updating relevant pytest tests in the same pull request.
+
+- Test new or changed behavior, including relevant edge cases and errors.
+- When fixing a bug, add a regression test where practical.
+- Keep automated unit tests independent of live services and credentials.
+- Place tests in `tests/`, using filenames such as `test_collect_news.py`.
+
+Run the tests from the repository root before requesting review:
+
+```bash
+uv run python -m pytest
+```
+
+If automated tests are not relevant, briefly explain why in the pull
+request description and describe how the change was verified.
 
 ### Documentation in Pull Requests
 
@@ -265,8 +293,25 @@ A documentation change is not required for every commit or pull request.
 If documentation is unaffected, state that no update is needed
 in the pull request description.
 
-Before merging, the reviewer should check that the documentation
-matches the proposed changes.
+### Reviewing and Merging
+
+The reviewer should check that:
+- The changes match the purpose and scope of the pull request.
+- Relevant tests are included and CI checks pass.
+- Documentation matches the proposed changes.
+- No credentials or other sensitive information are included.
+
+If everything looks good and CI checks pass, approve and merge
+the pull request.
+
+If changes are needed, comment on the relevant lines in the
+Files changed tab and submit the review with Request changes.
+For feedback that is not tied to a specific line, leave a general
+review comment.
+
+The contributor should address the feedback and push updates to
+the same branch. Review the updated changes and confirm that CI
+checks pass before merging.
 
 ## News Collection
 

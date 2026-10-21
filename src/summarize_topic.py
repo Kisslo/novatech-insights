@@ -575,7 +575,10 @@ def main() -> None:
     effort = os.getenv("CONTENT_WRITER_EFFORT", DEFAULT_EFFORT)
 
     if not args.csv.exists():
-        sys.exit(f"CSV file not found: {args.csv}")
+        sys.exit(
+            f"CSV file not found: {args.csv}\n"
+            "Run 'uv run python src/collect_news.py' first."
+        )
 
     limit = args.limit
     if limit is None and not (args.subject or args.keyword or rows):

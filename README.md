@@ -127,10 +127,50 @@ the system's final analysis method.
 - Shared Python version and dependency management.
 - Target environment for deployment and ongoing maintenance.
 
-## Development
+## Code Quality
 
-The project uses uv for Python environment and dependency management.
-The development Python version is specified in `.python-version`.
+Ruff linting and formatting rules are configured in `pyproject.toml`.
+
+Run these checks from the repository root:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+```
+
+These commands check the code without modifying files.
+To apply formatting, run:
+
+```bash
+uv run ruff format .
+```
+
+### Tests
+
+Run the tests from the repository root:
+
+```bash
+uv run python -m pytest
+```
+
+The tests cover date parsing, date formatting, and RSS description
+cleaning. They do not make network requests or connect to a database.
+
+### Continuous Integration
+
+The GitHub Actions workflow in `.github/workflows/ci.yml` runs on pull
+requests targeting `main` and on pushes to `main`. It also supports
+manual runs.
+
+CI installs dependencies from `uv.lock` and runs:
+
+```bash
+uv run --locked ruff check .
+uv run --locked python -m pytest
+```
+
+Formatting is checked locally using the command in the Code Quality
+section; it is not currently checked in CI.
 
 ### Local Setup
 
@@ -197,12 +237,21 @@ Verify that the tools are available in the project environment:
 
 ```bash
 uv run ruff --version
-uv run pytest --version
+uv run python -m pytest --version
 ```
 
-Both tools have been installed and verified locally.
-Linting rules, formatting conventions, and automated tests
-have not yet been configured.
+Ruff linting rules are configured in `pyproject.toml`, and automated
+tests are located in `tests/`.
+
+Run the tests from the repository root:
+
+```bash
+uv run python -m pytest
+```
+
+Use `python -m pytest` rather than `pytest` directly. This adds the
+current directory to Python's import search path, allowing the tests
+to import project code such as `src.collect_news`.
 
 ## Contribution Workflow
 
@@ -214,6 +263,25 @@ have not yet been configured.
   `docs: update development instructions`.
 
 Branch protection has been requested and is pending configuration.
+
+### Tests in Pull Requests
+
+The contributor implementing a change is responsible for adding or
+updating relevant pytest tests in the same pull request.
+
+- Test new or changed behavior, including relevant edge cases and errors.
+- When fixing a bug, add a regression test where practical.
+- Keep automated unit tests independent of live services and credentials.
+- Place tests in `tests/`, using filenames such as `test_collect_news.py`.
+
+Run the tests from the repository root before requesting review:
+
+```bash
+uv run python -m pytest
+```
+
+If automated tests are not relevant, briefly explain why in the pull
+request description and describe how the change was verified.
 
 ### Documentation in Pull Requests
 
@@ -228,8 +296,25 @@ A documentation change is not required for every commit or pull request.
 If documentation is unaffected, state that no update is needed
 in the pull request description.
 
-Before merging, the reviewer should check that the documentation
-matches the proposed changes.
+### Reviewing and Merging
+
+The reviewer should check that:
+- The changes match the purpose and scope of the pull request.
+- Relevant tests are included and CI checks pass.
+- Documentation matches the proposed changes.
+- No credentials or other sensitive information are included.
+
+If everything looks good and CI checks pass, approve and merge
+the pull request.
+
+If changes are needed, comment on the relevant lines in the
+Files changed tab and submit the review with Request changes.
+For feedback that is not tied to a specific line, leave a general
+review comment.
+
+The contributor should address the feedback and push updates to
+the same branch. Review the updated changes and confirm that CI
+checks pass before merging.
 
 ## News Collection
 
@@ -240,7 +325,7 @@ uv run python src/collect_news.py
 ```
 
 Sources are configured in `data/sources.csv`.
-Results are saved to `data/news.csv`.
+Results are saved to `data/news.csv` is local and ignored by Git. Run the collector to create or update it.
 
 - Supports RSS feeds with `channel/item` elements.
 - Prevents duplicates by checking the exact article link.
@@ -307,3 +392,22 @@ articles are not automatically deleted when they become older.
 
 If an upload fails, earlier batches may already be saved.
 Rerunning the command skips existing links.
+
+
+## Topic Summaries
+
+`src/summarize_topic.py` creates one Swedish topic summary from articles
+in `data/news.csv` using the Claude API.
+
+```powershell
+uv run python src/collect_news.py
+uv run python src/summarize_topic.py --keyword agent --fetch --limit 3 --dry-run
+uv run python src/summarize_topic.py --keyword agent --fetch --limit 3
+```
+
+`--dry-run` shows the selected articles and estimated cost without calling
+Claude. A real run needs `ANTHROPIC_API_KEY` in `.env`. Use `--help` to see
+all options.
+
+Summaries are stored temporarily as Markdown files in `output/summaries/`,
+which is ignored by Git. Database storage is planned in issue #5.

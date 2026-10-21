@@ -14,5 +14,8 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 
+# Generated article data (create it with src/collect_news.py)
+data/news.csv
+
 # Generated content output
 output/

@@ -1,3 +1,4 @@
+
 # Novatech Insights
 
 A system for collecting relevant news and developing it into content
@@ -30,7 +31,8 @@ perspective.
 
 ## Requirements and Constraints
 
-- Source text must not be copied into the system.
+- RSS descriptions may be stored as agreed by the team.
+  Other source article text must not be copied into the system.
 - LinkedIn must not be read automatically.
 - Topic or genre information must be considered when defining
   the news data structure, based on Kisslo's feedback.
@@ -125,10 +127,50 @@ the system's final analysis method.
 - Shared Python version and dependency management.
 - Target environment for deployment and ongoing maintenance.
 
-## Development
+## Code Quality
 
-The project uses uv for Python environment and dependency management.
-The development Python version is specified in `.python-version`.
+Ruff linting and formatting rules are configured in `pyproject.toml`.
+
+Run these checks from the repository root:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+```
+
+These commands check the code without modifying files.
+To apply formatting, run:
+
+```bash
+uv run ruff format .
+```
+
+### Tests
+
+Run the tests from the repository root:
+
+```bash
+uv run python -m pytest
+```
+
+The tests cover date parsing, date formatting, and RSS description
+cleaning. They do not make network requests or connect to a database.
+
+### Continuous Integration
+
+The GitHub Actions workflow in `.github/workflows/ci.yml` runs on pull
+requests targeting `main` and on pushes to `main`. It also supports
+manual runs.
+
+CI installs dependencies from `uv.lock` and runs:
+
+```bash
+uv run --locked ruff check .
+uv run --locked python -m pytest
+```
+
+Formatting is checked locally using the command in the Code Quality
+section; it is not currently checked in CI.
 
 ### Local Setup
 
@@ -155,7 +197,10 @@ Manual activation of `.venv` is not required.
 ### Environment Configuration
 
 `.env.example` documents the available configuration variables.
-No configuration variables have been defined yet.
+Supabase storage uses SUPABASE_URL and SUPABASE_KEY.
+Set SUPABASE_URL to the project base URL, without /rest/v1.
+Set SUPABASE_KEY to a secret API key for backend use only.
+Keep real credentials in the ignored .env file.
 
 When local configuration is needed, copy the template:
 
@@ -171,7 +216,7 @@ only safe placeholders and documentation.
 
 ### Dependencies
 
-Declare runtime dependencies in `pyproject.toml` using:
+Declare runtime dependencies in `pyproject.toml` usiNo conng:
 
 ```bash
 uv add <package>
@@ -192,12 +237,21 @@ Verify that the tools are available in the project environment:
 
 ```bash
 uv run ruff --version
-uv run pytest --version
+uv run python -m pytest --version
 ```
 
-Both tools have been installed and verified locally.
-Linting rules, formatting conventions, and automated tests
-have not yet been configured.
+Ruff linting rules are configured in `pyproject.toml`, and automated
+tests are located in `tests/`.
+
+Run the tests from the repository root:
+
+```bash
+uv run python -m pytest
+```
+
+Use `python -m pytest` rather than `pytest` directly. This adds the
+current directory to Python's import search path, allowing the tests
+to import project code such as `src.collect_news`.
 
 ## Contribution Workflow
 
@@ -209,6 +263,25 @@ have not yet been configured.
   `docs: update development instructions`.
 
 Branch protection has been requested and is pending configuration.
+
+### Tests in Pull Requests
+
+The contributor implementing a change is responsible for adding or
+updating relevant pytest tests in the same pull request.
+
+- Test new or changed behavior, including relevant edge cases and errors.
+- When fixing a bug, add a regression test where practical.
+- Keep automated unit tests independent of live services and credentials.
+- Place tests in `tests/`, using filenames such as `test_collect_news.py`.
+
+Run the tests from the repository root before requesting review:
+
+```bash
+uv run python -m pytest
+```
+
+If automated tests are not relevant, briefly explain why in the pull
+request description and describe how the change was verified.
 
 ### Documentation in Pull Requests
 
@@ -223,5 +296,99 @@ A documentation change is not required for every commit or pull request.
 If documentation is unaffected, state that no update is needed
 in the pull request description.
 
-Before merging, the reviewer should check that the documentation
-matches the proposed changes.
+### Reviewing and Merging
+
+The reviewer should check that:
+- The changes match the purpose and scope of the pull request.
+- Relevant tests are included and CI checks pass.
+- Documentation matches the proposed changes.
+- No credentials or other sensitive information are included.
+
+If everything looks good and CI checks pass, approve and merge
+the pull request.
+
+If changes are needed, comment on the relevant lines in the
+Files changed tab and submit the review with Request changes.
+For feedback that is not tied to a specific line, leave a general
+review comment.
+
+The contributor should address the feedback and push updates to
+the same branch. Review the updated changes and confirm that CI
+checks pass before merging.
+
+## News Collection
+
+Run the collector from the repository root:
+
+```powershell
+uv run python src/collect_news.py
+```
+
+Sources are configured in `data/sources.csv`.
+Results are saved to `data/news.csv`.
+
+- Supports RSS feeds with `channel/item` elements.
+- Prevents duplicates by checking the exact article link.
+- Stores publication dates in ISO 8601 format in UTC,
+  for example `2026-10-15T09:30:00Z`.
+- Keeps only articles published within the last seven days.
+- Skips articles with missing, invalid, timezone-free,
+  or future publication dates.
+- Applies the same checks to previously saved articles.
+- Saves articles with the newest first.
+
+Change `MAX_AGE_DAYS` in `src/collect_news.py` to adjust
+the time window.
+
+Output columns: `title`, `link`, `source`, `published`, `subject`, `description`.
+
+The current collector uses `published` for the publication date;
+the proposed grouping fields above call it `publication_date`.
+The shared field name still needs to be agreed.
+
+The `subject` field is currently left blank for new articles.
+The collector saves the RSS feed's `description` as plain text,
+with HTML formatting removed and whitespace normalized.
+Missing descriptions are saved as empty values.
+
+Existing articles with empty descriptions are updated when they
+are still available in the feed. Existing subjects are preserved.
+
+Descriptions are supplied by publishers, not generated or verified
+by our system. Their length varies, and the collector does not
+shorten them or fetch article pages.
+## Supabase News Storage
+
+Validate the collected CSV without changing local or remote data:
+
+```powershell
+uv run python src/store_news.py
+```
+
+Upload valid articles to the `public.news` table:
+
+```powershell
+uv run python src/store_news.py --upload
+```
+
+The uploader:
+- Reads `data/news.csv`.
+- Requires title, link, source, and a valid publication timestamp.
+- Accepts only timezone-aware dates within the last seven days.
+- Converts publication timestamps to UTC.
+- Removes duplicate links from the upload input.
+- Uploads in batches of up to 100 articles through the REST API.
+- Skips links already stored in Supabase without updating their fields.
+- Reports inserted articles and skipped existing links.
+- Leaves the CSV and the separate `news_articles` table unchanged.
+
+The database generates `id` and `collected_at`.
+A unique constraint on `link` prevents duplicate articles.
+Row Level Security is enabled. The backend secret key bypasses RLS
+and must never be included in frontend code or committed to Git.
+
+The seven-day filter applies to upload input. Previously uploaded
+articles are not automatically deleted when they become older.
+
+If an upload fails, earlier batches may already be saved.
+Rerunning the command skips existing links.

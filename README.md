@@ -325,7 +325,7 @@ uv run python src/collect_news.py
 ```
 
 Sources are configured in `data/sources.csv`.
-Results are saved to `data/news.csv`.
+Results are saved to `data/news.csv` is local and ignored by Git. Run the collector to create or update it.
 
 - Supports RSS feeds with `channel/item` elements.
 - Prevents duplicates by checking the exact article link.
@@ -392,3 +392,22 @@ articles are not automatically deleted when they become older.
 
 If an upload fails, earlier batches may already be saved.
 Rerunning the command skips existing links.
+
+
+## Topic Summaries
+
+`src/summarize_topic.py` creates one Swedish topic summary from articles
+in `data/news.csv` using the Claude API.
+
+```powershell
+uv run python src/collect_news.py
+uv run python src/summarize_topic.py --keyword agent --fetch --limit 3 --dry-run
+uv run python src/summarize_topic.py --keyword agent --fetch --limit 3
+```
+
+`--dry-run` shows the selected articles and estimated cost without calling
+Claude. A real run needs `ANTHROPIC_API_KEY` in `.env`. Use `--help` to see
+all options.
+
+Summaries are stored temporarily as Markdown files in `output/summaries/`,
+which is ignored by Git. Database storage is planned in issue #5.

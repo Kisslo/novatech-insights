@@ -1,89 +1,122 @@
-# News Data Format for Topic Grouping
+# Article Data Contract
 
 Status: Proposed agreement for issue #4.
-Data and Topics review is required before this agreement is final.
-This document describes the CSV output implemented in PR #1 and
-extended with RSS descriptions in PR #13. It also records the
-Supabase storage implementation proposed in PR #21.
+Data and Topics must review the pending decisions before this contract
+is final. Keep issue #4 open until its acceptance criteria are agreed.
 
-PR #21 has been tested against the shared Supabase project but is
-awaiting review and merge. Its database structure is documented below
-for review, not presented as a finalized team agreement.
+## Scope and references
 
-Topic assignment rules and storage require confirmation by Data
-and Topics. Issue #4 remains open until the acceptance criteria
-have been reviewed and agreed.
+This contract defines how Data, Topics, and Text identify and exchange
+collected news articles.
 
-## File format
+Supabase storage was implemented in merged PR #21.
 
-- File: `data/news.csv`
-- Encoding: UTF-8 with BOM. Python readers should use `utf-8-sig`.
-- Delimiter: comma.
-- The first row contains column names.
-- Each record represents one collected article.
-- Use a CSV parser because fields may contain commas or quotes.
+Implementation details are maintained in:
 
-Column order:
+- [README](../README.md): collection, CSV format, configuration, and upload commands.
+- [News table definition](../sql/001_create_news.sql): database columns and constraints.
+- [Collector](../src/collect_news.py): RSS collection behavior.
+- [Uploader](../src/store_news.py): validation and database insertion.
 
-```csv
-title,link,source,published,subject,description
-```
+This document records interface rules and pending agreements.
+It does not introduce database or application changes.
 
-## Field definitions
+## Article fields and database mapping
 
-| Field | Meaning | Empty values | Assigned by |
+The current ingestion table is `public.news`.
+The six CSV fields map directly to columns with the same names.
+
+| CSV field | Database column | PostgreSQL type | Meaning and empty-value rule |
 |---|---|---|---|
-| `title` | Headline supplied by the RSS feed. | Not allowed; the collector skips items without a title. | Data collector |
-| `link` | Article URL supplied by the feed. Used for exact-link deduplication. | Not allowed; the collector skips items without a link. | Data collector |
-| `source` | Source name from the `name` column in `data/sources.csv`. | Required by this proposed agreement. The collector does not currently validate that source names are non-empty. | Data through source configuration |
-| `published` | Article publication timestamp in ISO 8601 format, in UTC. | Not allowed in current output; missing or invalid dates are skipped. | Data collector |
-| `subject` | One topic label assigned to the article. | Allowed; empty means not grouped yet. | Topics: Mathias and Turker |
-| `description` | Publisher-supplied RSS description, with HTML formatting removed and whitespace normalized. It is not an AI-generated summary. | Allowed; empty means no description has been saved. | Data collector |
+| None | `id` | `bigint` | Generated identity primary key. Shared reference for stored articles. |
+| `title` | `title` | `text` | Publisher headline. Required and non-blank. |
+| `link` | `link` | `text` | Article URL. Required, non-blank, and unique. |
+| `source` | `source` | `text` | Source name. Required and non-blank at ingestion; SQL enforces NOT NULL. |
+| `published` | `published` | `timestamptz` | Publication time. Required and timezone-aware. |
+| `subject` | `subject` | `text` | Proposed topic assignment field. Empty string means pending grouping. |
+| `description` | `description` | `text` | Publisher-supplied RSS description. Empty string is allowed. |
+| None | `collected_at` | `timestamptz` | First database insertion time, default `now()`. |
 
-The CSV field name is `published`. Readers should use this name,
-rather than the earlier proposed name `publication_date`.
+All database columns are NOT NULL.
+`subject` and `description` default to empty strings.
 
-## Publication dates and collection window
+Use `published` as the shared publication-date field name.
+Do not substitute `publication_date` or `published_at` without an
+explicit mapping.
 
-Example timestamp: `2026-10-15T09:30:00Z`.
+Exchange timestamps in UTC, for example `2026-10-21T09:30:00Z`.
+Database clients may display `timestamptz` values in another timezone.
 
-`Z` means UTC. This is the publication time, not the collection time.
+Despite its name, `collected_at` records database insertion time,
+not the original RSS retrieval time.
 
-The collector converts supported RSS and ISO dates to UTC.
-It skips missing, invalid, timezone-free, and future dates.
+A separate `public.news_articles` table exists. Its purpose and
+relationship to `public.news` remain to be clarified. This contract
+does not define a mapping between those tables.
 
-The current collection window is the seven days preceding the
-start of each run. The same filter applies to previously saved rows.
-Articles are saved newest first.
+## Article identity and duplicate handling
 
-The CSV is a rolling collection, not a permanent archive.
-Topic grouping should parse timestamps as timezone-aware dates.
+Use `news.id` when referencing stored articles from grouping,
+summaries, or other database records.
 
-The uploader in PR #21 applies a seven-day filter to upload input.
-It does not delete previously stored articles. Database retention
-and any future cleanup policy still require team agreement.
+- The same exact stored link identifies the same collected article.
+- Ingestion trims surrounding whitespace before comparing links.
+- The database enforces uniqueness on `news.link`.
+- Repeated uploads preserve the existing article ID and fields.
+- CSV records have no database ID; resolve them using the stored link.
+- IDs are stable within this database while the record exists.
+  They are not portable across databases or deletion and reinsertion.
 
-## Subject assignment
+URL normalization, redirect resolution, tracking-parameter removal,
+and detection of the same story at different URLs are not implemented.
+Different URLs may therefore represent the same story.
 
-The collector leaves `subject` empty for new articles.
-It preserves existing subjects for articles retained in the CSV.
+The current uploader skips existing links. It does not update an
+existing article's subject or description from a later CSV record.
 
-Proposed rules:
+## Field ownership and descriptions
 
-- Topics assigns one label per article.
-- An empty value means "not grouped yet" and should enter grouping.
-- `Other` means the article has been reviewed but does not fit
-  another topic. It is not equivalent to an empty value.
-- Existing non-empty values should be checked against the agreed
-  topic list. Unexpected values should be flagged for review,
-  not silently converted to `Other`.
+Data owns collected article metadata and RSS descriptions.
+Topics owns topic assignment.
+Text owns generated summaries and drafts.
 
-The proposed topic list below is based on Nedal's issue comment
-reporting Turker's first version. Topics must confirm it.
+An RSS description is publisher-supplied text, not an AI-generated
+summary or verified article content.
 
-## Proposed topic list
+Missing descriptions are allowed. Downstream components must handle
+them without treating an otherwise valid article as invalid.
 
-Maintain the topic list in this section:
+Generated summaries and drafts must remain distinguishable from
+publisher descriptions.
+
+## Proposed topic assignment agreement
+
+The proposed initial storage location is `public.news.subject`,
+with one topic label per article.
+
+- Empty string means not grouped yet.
+- `Other` means classified but outside the other agreed labels.
+  It does not imply human review or approval.
+- Topics validates assignments against the agreed topic list.
+- Unexpected labels should be flagged rather than silently changed.
+- Data ingestion must preserve existing topic assignments.
+
+The collector preserves subjects for retained CSV records.
+The uploader preserves existing database records.
+
+PR #11 currently produces separate CSV output. That output does not
+automatically update `news.subject`.
+
+Data and Topics must agree how grouping results are written back,
+using `news.id` to identify stored articles. A database write-back
+operation is not supplied by the ingestion uploader.
+
+If multiple topics, assignment history, confidence scores, or model
+versions are needed, agree their storage before implementing them.
+
+### Initial topic list — pending Topics confirmation
+
+The earlier proposed list is:
 
 - AI and LLMs
 - AI agents and assistants
@@ -96,200 +129,67 @@ Maintain the topic list in this section:
 - Business and technology
 - Other
 
-Changes to the list should be reviewed by Data and Topics.
-Kisslo's priority search phrases may inform future changes.
+This list is not yet final. Topics must reconcile it with the labels
+used by the current grouping implementation before agreement.
+Changes should be reviewed by Data and Topics.
 
-## RSS descriptions
+## Proposed Text output storage
 
-The team has agreed to collect the RSS `description` field.
-The collector removes HTML formatting and normalizes whitespace.
+Nedal has proposed separate tables for summaries, source references,
+drafts, and draft versions.
 
-Descriptions come only from the RSS feed. The collector does not
-fetch article pages or shorten descriptions. Their length and
-completeness depend on the publisher; they are not guaranteed to
-be short summaries.
+See the [Text storage proposal in PR #10](https://github.com/Kisslo/novatech-insights/pull/10#issuecomment-6312435947).
 
-Existing descriptions are preserved. Missing descriptions can be
-filled when an article is still available in a feed, without changing
-its subject assignment.
+The proposal references collected articles through `news.id`.
+It is pending team review; this document does not establish that
+the proposed tables or workflow constraints are implemented.
 
-An empty description does not make an otherwise valid article invalid.
-It means no description has been saved, for example because the feed
-does not provide one or the article is no longer available in the feed.
+Text should confirm its output requirements. Data, Topics, and Text
+must agree the relationships before the shared schema is extended.
 
-## Example record
+## Collection window and retention
 
-Illustrative example of an ungrouped article:
+The CSV is a rolling seven-day collection.
+The uploader also validates publication dates against a seven-day
+input window.
 
-```csv
-title,link,source,published,subject,description
-Example: New open-source LLM released,https://example.com/article,Example Source,2026-10-15T09:30:00Z,,An illustrative description of the model release.
-```
+This input window is not a database retention policy.
+Previously stored articles are not automatically deleted.
 
-The empty field between `published` and `description` is `subject`.
-Topics could assign `AI and LLMs` after reviewing this article.
+Any cleanup policy must consider downstream references to `news.id`
+and be agreed before implementation.
 
-The example date illustrates the format; it is not a permanent
-test of eligibility for the rolling seven-day window.
+## Access
 
-## Interpretation by topic grouping
-
-- Read records with a CSV parser.
-- Use `title` as input for the proposed initial title-based test.
-- `description` is available as additional input if Topics chooses
-  to use it. Grouping must handle missing descriptions.
-- Retain `link` and `source` for traceability.
-- Treat exact matching links as the same collected article.
-- Different URLs may still describe the same story; the collector
-  does not detect that kind of duplication.
-- Treat empty subjects as pending grouping.
-- Flag records missing required fields rather than guessing values.
-
-The collector saves the six documented fields.
-A description is publisher-supplied text, not verified content
-or an AI-generated summary.
-
-## PostgreSQL / Supabase storage contract
-
-### Implementation status and table
-
-PR #21 proposes `public.news` as the storage table for collected RSS
-articles. The table has been created in the shared Supabase project.
-An initial upload inserted 455 articles; repeating the upload inserted
-zero articles and skipped 455 existing links.
-
-A separate table, `public.news_articles`, also exists. PR #21 does not
-read or modify it. Its purpose and relationship to `public.news` need
-confirmation before the team adopts a final shared contract.
-
-The table definition is recorded in `sql/001_create_news.sql` in
-PR #21. That file is not introduced by this documentation PR.
-
-### Field mapping and database types
-
-| CSV field | `public.news` column | PostgreSQL type | Rules |
-|---|---|---|---|
-| No CSV equivalent | `id` | `bigint` | Generated identity primary key; not supplied by the uploader. |
-| `title` | `title` | `text` | NOT NULL; database rejects blank or whitespace-only values. |
-| `link` | `link` | `text` | NOT NULL, UNIQUE; database rejects blank or whitespace-only values. |
-| `source` | `source` | `text` | NOT NULL; uploader also rejects blank values. |
-| `published` | `published` | `timestamptz` | NOT NULL; uploader requires a timezone-aware date within the last seven days. |
-| `subject` | `subject` | `text` | NOT NULL, default empty string; proposed topic assignment field. |
-| `description` | `description` | `text` | NOT NULL, default empty string; publisher-supplied RSS text. |
-| No CSV equivalent | `collected_at` | `timestamptz` | NOT NULL, default `now()` at database insertion. |
-
-The uploader strips leading and trailing whitespace from CSV values.
-Empty subjects and descriptions are stored as empty strings, not NULL.
-An empty description is allowed.
-
-PostgreSQL stores `timestamptz` values as instants; their displayed
-timezone depends on the client/session. Consumers should use UTC
-when exchanging or displaying contract timestamps.
-
-Despite its name, `collected_at` currently records the first database
-insertion time. It does not record the original RSS retrieval time.
-
-### Stable article identity
-
-`news.id` is the stable identifier for a stored article within this
-database. Downstream database records should reference this ID.
-
-The same exact link is treated as the same article. Re-uploading that
-link skips insertion and preserves the existing ID and fields.
-
-CSV records do not contain database IDs. A consumer that needs to
-associate a CSV article with a stored record must resolve it using
-the exact stored link.
-
-IDs are not guaranteed to remain the same after deletion and
-reinsertion or when loading articles into a different database.
-They are not guaranteed to be consecutive.
-
-URL normalization, redirects, tracking-parameter removal, and
-recognition of the same story at different URLs are not implemented.
-A changed URL may therefore create another article record.
-
-### Duplicate and update behavior
-
-The database enforces a UNIQUE constraint on `link`.
-
-The uploader in PR #21:
-- Deduplicates upload input by exact link after trimming whitespace.
-- Keeps the first valid CSV record when input links repeat.
-- Inserts batches of up to 100 articles.
-- Uses `on_conflict=link` with `resolution=ignore-duplicates`.
-- Leaves all existing database fields unchanged for duplicate links.
-
-Consequently, a later CSV description or subject does not update an
-existing database article. The collector's CSV description enrichment
-and the uploader's database behavior are different.
-
-Each batch is a separate request. If a later batch fails, earlier
-batches may already be stored. Rerunning skips existing links.
-
-### Topic assignment storage — proposed, not yet agreed
-
-The proposed initial storage location is `public.news.subject`,
-with one topic label per article:
-- Empty string means pending grouping.
-- `Other` means reviewed but outside the other agreed labels.
-- Topics owns assignment and validation against the agreed label list.
-- Data ingestion must preserve existing assignments.
-
-The current uploader can insert a subject supplied in a CSV record,
-but it does not update an existing article's subject. A grouping
-write-back operation is not implemented in PR #21.
-
-Topics should confirm whether it will write assignments to
-`news.subject` using `news.id` as the record identifier. If multiple
-topics, assignment history, confidence scores, or model versions are
-needed, a separate assignment structure must be agreed before
-implementation.
-
-This proposal does not define an implemented write-back API or grant
-database access to a grouping component.
-
-### Access and retention
+Backend credentials belong in local `.env` files or deployment secret
+configuration. Never commit them or expose them in frontend code.
 
 Row Level Security is enabled on `public.news`.
-The uploader uses a backend secret API key, which bypasses RLS.
-Real credentials belong in local `.env` or the deployment's secret
-configuration, never in Git or frontend code.
+The current uploader uses a backend secret key and does not introduce
+client-facing access policies.
 
-The current implementation does not add client-facing RLS policies.
+Access for grouping, Text, or a dashboard requires an appropriate
+backend integration or separately agreed access policies.
 
-The seven-day input window does not impose database retention.
-Stored articles remain until a separate cleanup process is agreed
-and implemented. No such process is included in PR #21.
+## Pending decisions
 
-## Remaining decisions and follow-up work
-
-- Confirm `public.news` as the shared ingestion table and clarify
-  the purpose of the existing `public.news_articles` table.
-- Confirm topic assignment storage and the grouping write-back interface.
-- Confirm the initial topic list and handling of unexpected labels.
-- Agree database retention and cleanup requirements.
-- Decide whether database description enrichment is required.
-- Validate non-empty source names in the collector; the uploader
-  already performs this check.
-- Review existing manual subject labels against the agreed list.
-- Avoid concurrent writes to `data/news.csv`.
-
-UTC conversion is already implemented in PR #1.
-RSS description collection is already implemented in PR #13.
+- Confirm the shared table and clarify the role of `news_articles`.
+- Agree the topic list and grouping write-back interface.
+- Review the proposed Text output schema and article references.
+- Agree retention and cleanup requirements.
+- Decide whether existing database descriptions need enrichment.
+- Record any required implementation changes as follow-up work.
 
 ## Review checklist
 
-- [ ] Data has reviewed field definitions and current behavior.
-- [ ] Data and Topics have agreed the shared table and field mapping.
-- [ ] Data and Topics have reviewed database types and empty values.
-- [ ] Data and Topics have agreed article identity and duplicate behavior.
-- [ ] Topics has confirmed topic storage, ownership, and write-back needs.
-- [ ] Topics has confirmed the initial topic list.
+- [ ] Data has reviewed field meanings, types, and empty values.
+- [ ] Data and Topics have agreed article identity and duplicate rules.
+- [ ] Data and Topics have confirmed the shared table and mapping.
+- [ ] Topics has confirmed the topic list and assignment storage.
+- [ ] Data and Topics have agreed the grouping write-back interface.
 - [ ] Data and Topics have reviewed description handling.
-- [ ] Retention behavior and unresolved implementation work are recorded.
+- [ ] Retention behavior and remaining work are recorded.
 - [ ] Issue #4 acceptance criteria have been reviewed and agreed.
 
-Keep issue #4 open until Data and Topics have reviewed and agreed
-the acceptance criteria. Documenting a proposal does not itself
-establish team agreement.
+Review of this documentation does not by itself implement the
+pending interfaces or approve the separate Text storage proposal.

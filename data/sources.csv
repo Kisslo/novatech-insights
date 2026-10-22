@@ -1,4 +1,31 @@
 name,feed_url,language
 n8n Blog,https://blog.n8n.io/rss/,en
 TechCrunch,https://techcrunch.com/feed/,en
-Breakit,https://www.breakit.se/feed/artiklar
+Breakit,https://www.breakit.se/feed/artiklar/,sv
+Tech.eu,https://tech.eu/feed/,en
+Ars Technica,https://feeds.arstechnica.com/arstechnica/index,en
+WIRED,https://www.wired.com/feed/rss,en
+The Register,https://www.theregister.com/headlines.rss,en
+BleepingComputer,https://www.bleepingcomputer.com/feed/,en
+Forskning.se,https://www.forskning.se/feed/,sv
+SweClockers,https://www.sweclockers.com/feeds/nyheter,sv
+SiliconANGLE,https://siliconangle.com/feed/,en
+The Hacker News,https://feeds.feedburner.com/TheHackersNews,en
+SecurityWeek,https://www.securityweek.com/feed/,en
+Help Net Security,https://www.helpnetsecurity.com/feed/,en
+TechRepublic,https://www.techrepublic.com/rssfeeds/articles/,en
+The New Stack,https://thenewstack.io/feed/,en
+AI Business,https://aibusiness.com/rss.xml,en
+Unite.AI,https://www.unite.ai/feed/,en
+Tech Xplore,https://techxplore.com/rss-feed/,en
+ScienceDaily AI,https://www.sciencedaily.com/rss/computers_math/artificial_intelligence.xml,en
+GeekWire,https://www.geekwire.com/feed/,en
+MIT Technology Review,https://www.technologyreview.com/feed/,en
+Engadget,https://www.engadget.com/rss.xml,en
+InfoQ,https://feed.infoq.com/news/,en
+Dark Reading,https://www.darkreading.com/rss.xml,en
+Computer Weekly,https://www.computerweekly.com/rss/All-Computer-Weekly-content.xml,en
+GitHub Blog,https://github.blog/feed/,en
+Krebs on Security,https://krebsonsecurity.com/feed/,en
+Schneier on Security,https://www.schneier.com/feed/,en
+SD Times,https://sdtimes.com/feed/,en

@@ -1,11 +1,24 @@
-# Python virtual environment
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Local Python virtual environment
 .venv/
 
 # Python cache
 __pycache__/
 *.py[cod]
 
-# Generated topic grouping files
+# Local tool caches
+.ruff_cache/
+.pytest_cache/
+
+# Generated article data
+data/news.csv
 data/news_with_metadata.csv
 data/news_with_topics.csv
 data/news_with_topics_backup.csv
+
+# Generated content output
+output/

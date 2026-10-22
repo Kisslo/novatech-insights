@@ -1,5 +1,5 @@
 
-from SRC.group_topics import classify_topic
+from src.group_topics import classify_topic
 
 
 def test_ai_article():

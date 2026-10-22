@@ -1,12 +1,11 @@
 
 import csv
-import re
 import ssl
-import certifi
 import urllib.request
 from html.parser import HTMLParser
 from pathlib import Path
 
+import certifi
 
 PROJECT_FOLDER = Path(__file__).resolve().parent.parent
 NEWS_FILE = PROJECT_FOLDER / "data" / "news.csv"

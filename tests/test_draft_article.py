@@ -111,6 +111,9 @@ def test_build_prompt_contains_argument_summary_and_rules():
     assert "500–800 words" in prompt
     assert "[UNVERIFIED]" in prompt
     assert "(sponsrad)" in prompt
+    assert "do not add a separate conclusion section" in prompt
+    assert "only for factual claims" in prompt
+    assert "never with new facts" in prompt
     assert "<source" not in prompt  # nothing fetched
 
 

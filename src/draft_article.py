@@ -93,13 +93,18 @@ Article rules:
 - Structure: "# " headline, an intro paragraph, {min_sections}–{max_sections} sections \
 with "## " subheadings, and a last section "## {sources}" with one line per source: \
 "- <publication name>: <short description in Swedish> – <link>" (do not guess \
-article titles)
+article titles). A closing paragraph belongs to the last section before \
+"## {sources}"; do not add a separate conclusion section
 - Do not write an author line; it is added later
 - The CEO's argument is the core; the news are examples that support it
 - Use only the information in the summary and the sources below
 - Mark every claim that the sources do not support with {tag} right after the claim
 - Claims from a source marked (betalvägg) or (ej läst), or that you could only \
 partially read, must be marked {tag}
+- Use {tag} only for factual claims; Novatech's own opinions and recommendations \
+are not tagged
+- If the sources are short, reach the word count with the CEO's argument and \
+Novatech's own analysis and recommendations, never with new facts
 - Do not use sources marked (sponsrad)
 - Do not copy sentences from the sources
 - Clearly separate Novatech's own recommendations from what the sources say

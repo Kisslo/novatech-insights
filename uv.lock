@@ -455,7 +455,6 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "anthropic" },
-    { name = "certifi" },
     { name = "python-dotenv" },
     { name = "trafilatura" },
 ]
@@ -469,7 +468,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=1.15.0" },
-    { name = "certifi", specifier = ">=2026.10.18" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
     { name = "trafilatura", specifier = ">=2.3.1" },
 ]

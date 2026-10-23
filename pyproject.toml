@@ -13,6 +13,13 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.17.0",]
 
+[tool.pytest.ini_options]
+# Lets tests import the scripts' shared helpers as `content_tools`,
+# the same way the scripts do when run as `python src/<script>.py`.
+pythonpath = ["src"]
+# Only collect tests from tests/, not local files elsewhere (e.g. output/).
+testpaths = ["tests"]
+
 [tool.ruff]
 line-length = 88
 

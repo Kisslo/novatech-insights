@@ -166,11 +166,21 @@ CI installs dependencies from `uv.lock` and runs:
 
 ```bash
 uv run --locked ruff check .
+uv run --locked ruff format --check .
 uv run --locked python -m pytest
 ```
 
-Formatting is checked locally using the command in the Code Quality
-section; it is not currently checked in CI.
+You can run the same commands locally from the repository root.
+The linting and formatting checks do not modify files.
+A failed check or test causes CI to fail.
+
+To fix formatting locally, run:
+
+```bash
+uv run --locked ruff format .
+```
+
+Commit any resulting formatting changes before pushing.
 
 ### Local Setup
 
@@ -357,6 +367,7 @@ are still available in the feed. Existing subjects are preserved.
 Descriptions are supplied by publishers, not generated or verified
 by our system. Their length varies, and the collector does not
 shorten them or fetch article pages.
+
 ## Supabase News Storage
 
 Validate the collected CSV without changing local or remote data:
@@ -392,7 +403,6 @@ articles are not automatically deleted when they become older.
 
 If an upload fails, earlier batches may already be saved.
 Rerunning the command skips existing links.
-
 
 ## Topic Summaries
 

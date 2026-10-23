@@ -90,11 +90,12 @@ The CEO's argument is the main message of the article:
 
 Article rules:
 - {min_words}–{max_words} words, in Markdown
-- Structure: "# " headline, an intro paragraph, {min_sections}–{max_sections} sections \
-with "## " subheadings, and a last section "## {sources}" with one line per source: \
-"- <publication name>: <short description in Swedish> – <link>" (do not guess \
-article titles). A closing paragraph belongs to the last section before \
-"## {sources}"; do not add a separate conclusion section
+- Structure, in this order: a "# " headline; an intro paragraph; \
+{min_sections}–{max_sections} "## " sections in total, the last one with Novatech's \
+own recommendations, ending with a short closing paragraph; then "## {sources}" with \
+one line per source: "- <publication name>: <short description in Swedish> – <link>" \
+(do not guess article titles). Do not add any other "## " section, such as a \
+separate conclusion
 - Do not write an author line; it is added later
 - The CEO's argument is the core; the news are examples that support it
 - Use only the information in the summary and the sources below
@@ -103,6 +104,9 @@ article titles). A closing paragraph belongs to the last section before \
 partially read, must be marked {tag}
 - Use {tag} only for factual claims; Novatech's own opinions and recommendations \
 are not tagged
+- Figures and other measurable claims (numbers, percentages, amounts, dates) that \
+the sources do not contain must be marked {tag}, also when they come from the \
+CEO's argument and also in the headline
 - If the sources are short, reach the word count with the CEO's argument and \
 Novatech's own analysis and recommendations, never with new facts
 - Do not use sources marked (sponsrad)
@@ -120,6 +124,7 @@ Notes for the reviewer (never published):
 - Write them in Swedish as a short bullet list
 - Mention unread or paywalled sources, sponsored sources you left out,
   figures that are the companies' own claims, and why each {tag} tag was used
+- Do not state the word count; it is counted automatically
 
 Answer with exactly these three parts and nothing else:
 <article_draft>

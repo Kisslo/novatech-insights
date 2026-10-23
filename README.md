@@ -368,6 +368,49 @@ Descriptions are supplied by publishers, not generated or verified
 by our system. Their length varies, and the collector does not
 shorten them or fetch article pages.
 
+## Topic Classification
+
+The topic classifier assigns news articles to topic categories using
+the keywords defined in `src/group_topics.py`.
+
+### Run the classifier
+
+Run from the repository root:
+
+```powershell
+uv run python src/group_topics.py
+```
+
+The script reads `data/news.csv` and writes classified articles to
+`data/news_with_topics.csv`. The input CSV must contain the columns
+`title`, `link`, `source`, `published`, and `subject`. The `description`
+column is used when available; older CSV files without it are supported.
+
+Existing non-empty `subject` values are preserved during normal runs.
+Only articles with an empty `subject` are classified.
+
+To intentionally reclassify all articles, including those with an
+existing subject, run:
+
+```powershell
+uv run python src/group_topics.py --reclassify
+```
+
+### Test topic classification
+
+Run the topic classification tests:
+
+```powershell
+uv run --locked python -m pytest tests/test_group_topics.py
+```
+
+Run all tests and lint checks:
+
+```powershell
+uv run --locked python -m pytest
+uv run --locked ruff check .
+```
+
 ## Supabase News Storage
 
 Validate the collected CSV without changing local or remote data:

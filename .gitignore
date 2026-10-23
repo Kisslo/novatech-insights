@@ -6,7 +6,7 @@
 # Local Python virtual environment
 .venv/
 
-# Generated Python bytecode
+# Python cache
 __pycache__/
 *.py[cod]
 
@@ -14,8 +14,11 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 
-# Generated article data (create it with src/collect_news.py)
+# Generated article data
 data/news.csv
+data/news_with_metadata.csv
+data/news_with_topics.csv
+data/news_with_topics_backup.csv
 
 # Generated content output
 output/

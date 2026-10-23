@@ -11,6 +11,7 @@ from src.draft_article import (
     count_sentences,
     count_words,
     draft_stats,
+    is_readable,
     main,
     parse_response,
     read_argument,
@@ -75,6 +76,19 @@ def test_articles_from_summary_skips_sponsored_and_duplicates():
 
     assert [a["link"] for a in articles] == ["https://a.se/1", "https://b.se/2"]
     assert articles[0]["source"] == "a.se"
+
+
+@pytest.mark.parametrize(
+    ("article", "expected"),
+    [
+        ({"link": "x", "unread": False}, True),  # no --fetch
+        ({"link": "x", "unread": True}, False),  # (ej läst) or (betalvägg)
+        ({"link": "x", "unread": False, "text": "Brödtext"}, True),
+        ({"link": "x", "unread": False, "text": None}, False),  # fetch failed
+    ],
+)
+def test_is_readable(article, expected):
+    assert is_readable(article) is expected
 
 
 def test_read_argument_from_file_and_text(tmp_path):
@@ -177,6 +191,25 @@ def test_check_draft_accepts_good_draft():
     articles = articles_from_summary(SUMMARY)
 
     assert check_draft(parts, articles) == []
+
+
+def test_check_draft_allows_leaving_out_unread_source():
+    # Real run 2026-10-23: The Register was (ej läst) and rightly left out.
+    summary = "Källor\n- https://a.se/1\n- https://reg.com/x (ej läst)"
+    article = make_article().replace("- Källa B – https://b.se/2", "")
+    parts = parse_response(make_response(article=article))
+
+    assert check_draft(parts, articles_from_summary(summary)) == []
+
+
+def test_check_draft_still_requires_read_sources():
+    summary = "Källor\n- https://a.se/1\n- https://c.se/3"
+    parts = parse_response(make_response())  # lists a.se and b.se, not c.se
+
+    warnings = "\n".join(check_draft(parts, articles_from_summary(summary)))
+
+    assert "Source missing from 'Källor': https://c.se/3" in warnings
+    assert "Link not in the sources (check it!): https://b.se/2" in warnings
 
 
 def test_check_draft_warns_about_problems():

@@ -92,7 +92,8 @@ Article rules:
 - {min_words}–{max_words} words, in Markdown
 - Structure: "# " headline, an intro paragraph, {min_sections}–{max_sections} sections \
 with "## " subheadings, and a last section "## {sources}" with one line per source: \
-"- <title or short description> – <link>"
+"- <publication name>: <short description in Swedish> – <link>" (do not guess \
+article titles)
 - Do not write an author line; it is added later
 - The CEO's argument is the core; the news are examples that support it
 - Use only the information in the summary and the sources below
@@ -146,20 +147,30 @@ def articles_from_summary(summary: str) -> list[dict]:
 
     Each link is used once, in the order it appears. The source is the domain.
     Links on a line marked (sponsrad) are left out: they must not be used.
+    Links marked (ej läst) or (betalvägg) get "unread": True.
     """
     articles = []
     seen = set()
     for line in summary.splitlines():
-        if "(sponsrad)" in line.lower():
+        lowered = line.lower()
+        if "(sponsrad)" in lowered:
             continue
+        unread = "(ej läst)" in lowered or "(betalvägg)" in lowered
         for raw_link in LINK_PATTERN.findall(line):
             link = raw_link.rstrip(".,;")
             if link in seen:
                 continue
             seen.add(link)
             domain = urlparse(link).netloc.removeprefix("www.")
-            articles.append({"link": link, "source": domain})
+            articles.append({"link": link, "source": domain, "unread": unread})
     return articles
+
+
+def is_readable(article: dict) -> bool:
+    """True if the source could be read: not marked unread, and not a failed fetch."""
+    if article.get("unread"):
+        return False
+    return "text" not in article or bool(article["text"])
 
 
 def read_argument(arguments_file: Path | None, argument_text: str | None) -> str:
@@ -303,7 +314,9 @@ def check_draft(parts: dict[str, str], articles: list[dict]) -> list[str]:
     for name in ("article", "linkedin"):
         if "notes for reviewer" in parts[name].lower():
             warnings.append(f"Reviewer notes leaked into the {name} text.")
-    warnings.extend(check_source_links(parts["article"], articles))
+    # Unread sources may be left out of "Källor"; read sources must be listed.
+    readable = [a for a in articles if is_readable(a)]
+    warnings.extend(check_source_links(parts["article"], articles, readable))
     return warnings
 
 

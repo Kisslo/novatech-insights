@@ -1,10 +1,10 @@
-
+import argparse
 import csv
 import re
 from pathlib import Path
 
 PROJECT_FOLDER = Path(__file__).resolve().parent.parent
-INPUT_FILE = PROJECT_FOLDER / "data" / "news_with_metadata.csv"
+INPUT_FILE = PROJECT_FOLDER / "data" / "news.csv"
 OUTPUT_FILE = PROJECT_FOLDER / "data" / "news_with_topics.csv"
 
 
@@ -155,7 +155,6 @@ TOPIC_KEYWORDS = {
         "stock market",
         "stock exchange",
         "listed on the stock exchange",
-        "shares",
         "fintech",
         "salary",
         "salaries",
@@ -170,8 +169,6 @@ TOPIC_KEYWORDS = {
         "miljarder",
         "lön",
         "lönerna",
-        "bolag",
-        "företag",
     ],
 }
 
@@ -205,18 +202,28 @@ def classify_topic(title, description="", categories=""):
         keywords = TOPIC_KEYWORDS.get(topic, [])
 
         for keyword in keywords:
-            if normalize(keyword) in full_text:
+            if re.search(
+                rf"(?<!\w){re.escape(normalize(keyword))}(?!\w)",
+                full_text,
+            ):
                 return topic
 
     return "Other"
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Classify news articles by topic."
+    )
+    parser.add_argument(
+        "--reclassify",
+        action="store_true",
+        help="Reclassify all articles, including those with an existing subject.",
+    )
+    args = parser.parse_args()
+
     if not INPUT_FILE.exists():
-        raise FileNotFoundError(
-            f"Input file not found: {INPUT_FILE}\n"
-            "Run fetch_news_metadata.py first."
-        )
+        raise FileNotFoundError(f"Input file not found: {INPUT_FILE}")
 
     with INPUT_FILE.open(
         "r", encoding="utf-8-sig", newline=""
@@ -225,7 +232,13 @@ def main():
         fieldnames = reader.fieldnames or []
         articles = list(reader)
 
-    required_columns = {"title", "subject", "description", "categories"}
+    required_columns = {
+        "title",
+        "link",
+        "source",
+        "published",
+        "subject",
+    }
     missing_columns = required_columns - set(fieldnames)
 
     if missing_columns:
@@ -233,26 +246,47 @@ def main():
             f"Missing required columns: {', '.join(sorted(missing_columns))}"
         )
 
+    # Support older input files that do not yet have descriptions.
+    output_fieldnames = list(fieldnames)
+    if "description" not in output_fieldnames:
+        output_fieldnames.append("description")
+
+    classified_count = 0
+    preserved_count = 0
+
     for article in articles:
+        article["description"] = article.get("description") or ""
+        existing_subject = (article.get("subject") or "").strip()
+
+        # Preserve existing assignments during normal runs.
+        if existing_subject and not args.reclassify:
+            preserved_count += 1
+            continue
+
         article["subject"] = classify_topic(
             title=article.get("title", ""),
-            description=article.get("description", ""),
-            categories=article.get("categories", ""),
+            description=article["description"],
         )
+        classified_count += 1
 
     with OUTPUT_FILE.open(
         "w", encoding="utf-8-sig", newline=""
     ) as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer = csv.DictWriter(
+            file,
+            fieldnames=output_fieldnames,
+        )
         writer.writeheader()
         writer.writerows(articles)
 
     topic_counts = {}
     for article in articles:
-        topic = article["subject"]
+        topic = (article.get("subject") or "").strip() or "(empty)"
         topic_counts[topic] = topic_counts.get(topic, 0) + 1
 
-    print(f"Articles processed: {len(articles)}")
+    print(f"Articles classified: {classified_count}")
+    print(f"Existing subjects preserved: {preserved_count}")
+    print(f"Total articles: {len(articles)}")
     print(f"Output saved to: {OUTPUT_FILE}")
     print("\nArticles per topic:")
 

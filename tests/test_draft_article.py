@@ -76,6 +76,7 @@ def test_articles_from_summary_skips_sponsored_and_duplicates():
 
     assert [a["link"] for a in articles] == ["https://a.se/1", "https://b.se/2"]
     assert articles[0]["source"] == "a.se"
+    assert [a["unread"] for a in articles] == [False, True]  # b.se is (betalvägg)
 
 
 @pytest.mark.parametrize(

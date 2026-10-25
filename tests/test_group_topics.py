@@ -6,51 +6,37 @@ from src.group_topics import classify_topic
 
 
 def test_ai_article():
-    result = classify_topic(
-        "New artificial intelligence model released"
-    )
+    result = classify_topic("New artificial intelligence model released")
     assert result == "AI and LLMs"
 
 
 def test_frontier_model_article():
-    result = classify_topic(
-        "Meta releases a new frontier model"
-    )
+    result = classify_topic("Meta releases a new frontier model")
     assert result == "AI and LLMs"
 
 
 def test_ai_agents_article():
-    result = classify_topic(
-        "Introducing n8n agents"
-    )
+    result = classify_topic("Introducing n8n agents")
     assert result == "AI agents and assistants"
 
 
 def test_ai_automation_article():
-    result = classify_topic(
-        "Build a morning AI news brief with You.com, Jev, n8n"
-    )
+    result = classify_topic("Build a morning AI news brief with You.com, Jev, n8n")
     assert result == "AI automation and workflows"
 
 
 def test_cybersecurity_article():
-    result = classify_topic(
-        "Major cybersecurity breach reported"
-    )
+    result = classify_topic("Major cybersecurity breach reported")
     assert result == "Cybersecurity"
 
 
 def test_devops_article():
-    result = classify_topic(
-        "11 Best DevOps Automation Tools for Engineering Teams"
-    )
+    result = classify_topic("11 Best DevOps Automation Tools for Engineering Teams")
     assert result == "Cloud and DevOps"
 
 
 def test_api_article():
-    result = classify_topic(
-        "How API Contract Testing Prevents Production Failures"
-    )
+    result = classify_topic("How API Contract Testing Prevents Production Failures")
     assert result == "Software and APIs"
 
 
@@ -86,16 +72,12 @@ def test_generic_foretag_does_not_match_finance():
 
 
 def test_priority_when_multiple_topics_match():
-    result = classify_topic(
-        "AI agents expose a major cybersecurity vulnerability"
-    )
+    result = classify_topic("AI agents expose a major cybersecurity vulnerability")
     assert result == "Cybersecurity"
 
 
 def test_unknown_article():
-    result = classify_topic(
-        "Local bakery opens a new shop"
-    )
+    result = classify_topic("Local bakery opens a new shop")
     assert result == "Other"
 
 
@@ -104,7 +86,6 @@ def test_main_preserves_existing_subject_and_classifies_empty_subject(
 ):
     input_file = tmp_path / "news.csv"
     output_file = tmp_path / "news_with_topics.csv"
-
 
     fieldnames = [
         "title",
@@ -198,9 +179,7 @@ def test_main_reclassify_overwrites_existing_subject(tmp_path, monkeypatch):
     assert result[0]["subject"] == "Other"
 
 
-def test_main_supports_legacy_csv_without_description(
-    tmp_path, monkeypatch
-):
+def test_main_supports_legacy_csv_without_description(tmp_path, monkeypatch):
     input_file = tmp_path / "news.csv"
     output_file = tmp_path / "news_with_topics.csv"
 

@@ -8,7 +8,6 @@ INPUT_FILE = PROJECT_FOLDER / "data" / "news.csv"
 OUTPUT_FILE = PROJECT_FOLDER / "data" / "news_with_topics.csv"
 
 
-
 TOPIC_KEYWORDS = {
     "AI and LLMs": [
         "artificial intelligence",
@@ -212,9 +211,7 @@ def classify_topic(title, description="", categories=""):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Classify news articles by topic."
-    )
+    parser = argparse.ArgumentParser(description="Classify news articles by topic.")
     parser.add_argument(
         "--reclassify",
         action="store_true",
@@ -225,9 +222,7 @@ def main():
     if not INPUT_FILE.exists():
         raise FileNotFoundError(f"Input file not found: {INPUT_FILE}")
 
-    with INPUT_FILE.open(
-        "r", encoding="utf-8-sig", newline=""
-    ) as file:
+    with INPUT_FILE.open("r", encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
         fieldnames = reader.fieldnames or []
         articles = list(reader)
@@ -269,9 +264,7 @@ def main():
         )
         classified_count += 1
 
-    with OUTPUT_FILE.open(
-        "w", encoding="utf-8-sig", newline=""
-    ) as file:
+    with OUTPUT_FILE.open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.DictWriter(
             file,
             fieldnames=output_fieldnames,

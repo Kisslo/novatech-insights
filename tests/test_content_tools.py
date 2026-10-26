@@ -143,6 +143,7 @@ def test_check_source_links_all_correct():
 
     assert check_source_links(summary, articles) == []
 
+
 def test_check_source_links_finds_invented_and_missing_links():
     articles = [{"link": "https://a.se/1"}, {"link": "https://b.se/2"}]
     summary = "Källor\n- https://a.se/1\n- https://invented.com/x."
@@ -151,6 +152,7 @@ def test_check_source_links_finds_invented_and_missing_links():
 
     assert any("invented.com/x" in w and "not in the sources" in w for w in warnings)
     assert any("b.se/2" in w and "missing" in w for w in warnings)
+
 
 def test_check_source_links_only_requires_given_sources():
     articles = [{"link": "https://a.se/1"}, {"link": "https://b.se/2"}]

@@ -464,3 +464,40 @@ all options.
 
 Summaries are stored temporarily as Markdown files in `output/summaries/`,
 which is ignored by Git. Database storage is planned in issue #5.
+
+
+## Article Drafts
+
+`src/draft_article.py` turns a topic summary and the CEO's argument into a
+Swedish article draft (500–800 words) and a LinkedIn post (3–5 sentences)
+using the Claude API.
+
+```powershell
+uv run python src/draft_article.py --summary output/summaries/summary_X.md --arguments arguments.txt --author "Name" --fetch --dry-run
+uv run python src/draft_article.py --summary output/summaries/summary_X.md --arguments arguments.txt --author "Name" --fetch
+```
+
+- Give the argument as a text file with `--arguments` or as text with
+  `--argument-text`.
+- `--author` is added by the script under the headline.
+- `--fetch` reads the open source articles behind the summary's links
+  (robots.txt and paywall check). Recommended: with the summary alone, the
+  article is often shorter than 500 words. Article text is kept in memory only.
+- `--dry-run` shows the prompt and the maximum cost without calling Claude and
+  works without an API key.
+
+Drafts are saved in `output/drafts/draft_<time>/`, which is ignored by Git:
+
+- `article.md` – the article.
+- `linkedin.md` – the LinkedIn post, with `[LÄNK]` as the link placeholder.
+- `reviewer_notes.md` – notes for the reviewer and automatic checks (word
+  count, sections, sentences, source links, number of `[UNVERIFIED]` tags).
+  Never published.
+
+Claims that the sources do not support are tagged `[UNVERIFIED]` and must be
+resolved before approval. The model can miss a claim or tag one that is
+supported, so the reviewer notes and a separate source check (planned) are
+still needed. Database storage of drafts is planned in issue #28.
+
+Shared helpers for the Content scripts (article fetching, paywall detection,
+cost estimate and the Claude call) are in `src/content_tools.py`.

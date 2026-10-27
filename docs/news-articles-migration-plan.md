@@ -64,6 +64,24 @@ Before migration:
 The actual workflow links and complete dependency inventory remain
 pending. Do not stop workflows or change rss_feeds based only on
 assumptions.
+### Python writer inspection — 2026-10-27
+
+Inspected src/store_news.py on origin/main at commit 6ab8736.
+
+- Reads and validates data/news.csv.
+- Inserts into public.news through the Supabase REST API only
+  when run with --upload.
+- Skips existing links without updating their records.
+- Omits id from inserts and requests generated IDs in the response.
+- Does not write to news_articles, rss_feeds or topic tables.
+- The new schema must remain compatible with these inserts.
+
+A search of origin/main/src for Supabase and database connection
+patterns found matches only in this file. This does not rule out
+other branches, external scripts or n8n workflows.
+
+The actual n8n workflow has been requested from Turker.
+Its current table dependencies and active status remain unverified.
 
 ## 3. Inspection evidence
 

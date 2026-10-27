@@ -157,6 +157,22 @@ permissions or all database dependencies.
 Refresh counts, schema, constraints and dependencies before migration.
 Record the execution date, queries and results in the implementation PR.
 
+### Refreshed record counts — 2026-10-27
+
+Read-only checks in Supabase returned:
+
+| Check | Result |
+|---|---:|
+| Records in public.news | 1,954 |
+| Records in public.news_articles | 40 |
+| Records in public.rss_feeds | 30 |
+| news_articles records with an exact link match in news | 15 |
+| news_articles records without an exact link match in news | 25 |
+
+The matched and unmatched counts total 40.
+Matching links does not verify category accuracy.
+No records or database structures were changed.
+
 ## 4. Article-to-topic relationship
 
 Kisslo confirmed that an article can belong to multiple topics.

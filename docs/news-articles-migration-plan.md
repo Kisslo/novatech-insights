@@ -81,7 +81,36 @@ patterns found matches only in this file. This does not rule out
 other branches, external scripts or n8n workflows.
 
 The actual n8n workflow has been requested from Turker.
-Its current table dependencies and active status remain unverified.
+The supplied JSON export was inspected on 2026-10-27 and has
+active set to false. Its current table references are provisional;
+the final dependencies must be confirmed after Turker's redesign.
+
+### n8n workflow inspection — 2026-10-27
+
+Workflow: [My workflow](https://novatech-solutions.app.n8n.cloud/workflow/7sGmy86NQShmTgWb)
+
+Turker confirmed that this workflow is inactive, unfinished and
+will be redesigned. Its current table references are not the
+agreed future integration design.
+
+Static inspection of the supplied JSON export found:
+
+- active is false.
+- Reads active feed configurations from rss_feeds.
+- Fetches articles directly from RSS URLs.
+- Assigns keyword-based subjects in JavaScript.
+- Is configured to insert into news and ignore duplicate links.
+- Does not read existing news articles or carry their news.id.
+- Does not reference news_articles or the proposed topic tables.
+- Replaces missing or invalid publication dates with the current time.
+- Contains no seven-day publication-date filter.
+- The Schedule Trigger has no outgoing connection in this export.
+
+The workflow was not executed during this inspection.
+This export does not establish which process created the existing
+news_articles records. Final readers, writers and article-ID
+handling must be confirmed after the redesign.
+
 
 ## 3. Inspection evidence
 

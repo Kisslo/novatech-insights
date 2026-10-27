@@ -1,5 +1,6 @@
 import pytest
 
+from content_tools import ClaudeError
 from src.summarize_topic import (
     build_prompt,
     main,
@@ -153,3 +154,23 @@ def test_dry_run_prints_prompt(tmp_path, monkeypatch, capsys):
     assert "--- Prompt ---" in out
     assert "Title: Agent news" in out
     assert "Dry run: no call to Claude made." in out
+
+
+def test_failed_claude_call_stops_with_same_message(tmp_path, monkeypatch):
+    csv_path = tmp_path / "news.csv"
+    csv_path.write_text(
+        "title,link,source,published,subject,description\n"
+        "Agent news,https://a.se/1,Source,2026-10-20T08:00:00Z,,A description\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("sys.argv", ["summarize_topic.py", "--csv", str(csv_path)])
+
+    def fail(*args, **kwargs):
+        raise ClaudeError("Rate limit reached. Wait a minute and try again.")
+
+    monkeypatch.setattr("src.summarize_topic.call_claude", fail)
+
+    with pytest.raises(SystemExit) as stopped:
+        main()
+
+    assert str(stopped.value) == "Rate limit reached. Wait a minute and try again."

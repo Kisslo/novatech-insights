@@ -1,6 +1,7 @@
 """Shared helpers for the Content scripts.
 
-Used by summarize_topic.py and draft_article.py (and later the source check).
+Used by summarize_topic.py, and later by the topic labels (#27), article
+drafts and the source check.
 The scripts import this file with `from content_tools import ...` and are run
 as before, e.g. `uv run python src/summarize_topic.py`.
 
@@ -13,6 +14,8 @@ Contents:
 - Article fetching: robots.txt check, paywall detection, text extraction.
   Article text is kept in memory only and is never saved to disk.
 - Claude: prices, cost estimate, the API call and a dry-run printout.
+  call_claude() raises ClaudeError instead of stopping the program, so a
+  script that handles many topics can report one failure and continue.
 - Source links: compare links in a generated text with the links we sent.
 """
 
@@ -20,7 +23,6 @@ import argparse
 import json
 import os
 import re
-import sys
 import threading
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -344,6 +346,13 @@ def check_source_links(
 # -------------------- Claude
 
 
+class ClaudeError(Exception):
+    """The call to Claude could not be made or failed.
+
+    The message is written for the user, e.g. "Rate limit reached. ...".
+    """
+
+
 def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float | None:
     """Cost in USD for a given number of tokens, or None if the price is unknown."""
     if model not in PRICES_PER_MTOK:
@@ -382,12 +391,13 @@ def call_claude(
     """Send the prompt to Claude. Returns (text, input_tokens, output_tokens).
 
     max_tokens caps thinking plus answer; you only pay for what is used.
-    Exits with a clear message if the API key is missing or the call fails.
+    Raises ClaudeError with a clear message if the API key is missing or the
+    call fails. The caller decides whether to stop or to continue.
     """
     import anthropic  # imported here so --dry-run works without the API
 
     if not os.getenv("ANTHROPIC_API_KEY"):
-        sys.exit("ANTHROPIC_API_KEY is missing. Add it to your .env file.")
+        raise ClaudeError("ANTHROPIC_API_KEY is missing. Add it to your .env file.")
 
     client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from the environment
     try:
@@ -398,14 +408,20 @@ def call_claude(
             messages=[{"role": "user", "content": prompt}],
             output_config={"effort": effort},
         )
-    except anthropic.AuthenticationError:
-        sys.exit("The API key was rejected. Check ANTHROPIC_API_KEY in .env.")
-    except anthropic.RateLimitError:
-        sys.exit("Rate limit reached. Wait a minute and try again.")
-    except anthropic.APIConnectionError:
-        sys.exit("Could not reach the Claude API. Check your internet connection.")
+    except anthropic.AuthenticationError as error:
+        raise ClaudeError(
+            "The API key was rejected. Check ANTHROPIC_API_KEY in .env."
+        ) from error
+    except anthropic.RateLimitError as error:
+        raise ClaudeError("Rate limit reached. Wait a minute and try again.") from error
+    except anthropic.APIConnectionError as error:
+        raise ClaudeError(
+            "Could not reach the Claude API. Check your internet connection."
+        ) from error
     except anthropic.APIStatusError as error:
-        sys.exit(f"Claude API error {error.status_code}: {error.message}")
+        raise ClaudeError(
+            f"Claude API error {error.status_code}: {error.message}"
+        ) from error
 
     if response.stop_reason == "max_tokens":
         print("Warning: the answer was cut off (max_tokens reached).")

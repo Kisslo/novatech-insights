@@ -1,6 +1,8 @@
 import pytest
 
 from content_tools import (
+    ClaudeError,
+    call_claude,
     check_source_links,
     detect_paywall,
     estimate_cost,
@@ -181,3 +183,41 @@ def test_estimate_cost_known_model():
 )
 def test_format_cost(cost, expected):
     assert format_cost(cost).startswith(expected)
+
+
+# -------------------- Claude call
+
+
+def test_call_claude_without_api_key_raises(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    with pytest.raises(ClaudeError, match="ANTHROPIC_API_KEY is missing"):
+        call_claude("claude-sonnet-5-5", "system", "prompt", "low", 100)
+
+
+def test_call_claude_api_error_raises_instead_of_exiting(monkeypatch):
+    import anthropic
+
+    # Build the SDK error without a real HTTP request; only its type matters here.
+    connection_error = anthropic.APIConnectionError.__new__(
+        anthropic.APIConnectionError
+    )
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            raise connection_error
+
+    class FakeClient:
+        messages = FakeMessages()
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(anthropic, "Anthropic", lambda: FakeClient())
+
+    with pytest.raises(ClaudeError, match="Could not reach the Claude API"):
+        call_claude("claude-sonnet-5-5", "system", "prompt", "low", 100)
+
+
+def test_claude_error_is_a_normal_exception():
+    # A normal Exception (not SystemExit), so a loop over topics can catch it.
+    assert issubclass(ClaudeError, Exception)
+    assert not issubclass(ClaudeError, SystemExit)

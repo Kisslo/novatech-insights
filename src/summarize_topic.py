@@ -46,6 +46,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from content_tools import (
+    ClaudeError,
     add_article_texts,
     call_claude,
     check_source_links,
@@ -279,9 +280,13 @@ def main() -> None:
         print_dry_run(model, SYSTEM_PROMPT, prompt, MAX_OUTPUT_TOKENS)
         return
 
-    text, tokens_in, tokens_out = call_claude(
-        model, SYSTEM_PROMPT, prompt, effort, MAX_OUTPUT_TOKENS
-    )
+    try:
+        text, tokens_in, tokens_out = call_claude(
+            model, SYSTEM_PROMPT, prompt, effort, MAX_OUTPUT_TOKENS
+        )
+    except ClaudeError as error:
+        sys.exit(str(error))  # one summary per run: stop with the same message
+
     cost = estimate_cost(model, tokens_in, tokens_out)
     print(f"Tokens: {tokens_in} in / {tokens_out} out | Cost: {format_cost(cost)}")
     if not text:

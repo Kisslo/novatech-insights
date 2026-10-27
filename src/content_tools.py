@@ -321,15 +321,22 @@ def add_article_texts(articles: list[dict]) -> None:
 # -------------------- source links
 
 
-def check_source_links(text: str, articles: list[dict]) -> list[str]:
-    """Compare links in a generated text with the links we sent. Returns warnings."""
+def check_source_links(
+    text: str, articles: list[dict], required: list[dict] | None = None
+) -> list[str]:
+    """Compare links in a generated text with the links we sent. Returns warnings.
+
+    Every link in the text must be one of `articles`. Every link in `required`
+    (default: all `articles`) must appear in the text.
+    """
     sent = {a["link"].rstrip("/") for a in articles}
+    must_have = sent if required is None else {a["link"].rstrip("/") for a in required}
     found = {link.rstrip(".,;/") for link in LINK_PATTERN.findall(text)}
     found = {link.rstrip("/") for link in found}
     warnings = []
     for link in sorted(found - sent):
         warnings.append(f"Link not in the sources (check it!): {link}")
-    for link in sorted(sent - found):
+    for link in sorted(must_have - found):
         warnings.append(f"Source missing from 'Källor': {link}")
     return warnings
 

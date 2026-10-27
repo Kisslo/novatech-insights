@@ -1,43 +1,61 @@
-# News, Topics and Posts: Assessment and Migration Plan
+# News and Topics: Assessment and Migration Plan
 
-Status: Draft for team review on Monday, 2026-10-26.
+Status: Draft updated on 2026-10-27.
 No database changes have been applied through this plan.
 
-Related: PR #29 and issues #26, #19, #27, #28.
-Existing data contract: PR #10.
+Related:
+- Issue #26: news/topics storage and ranked-topic read interface.
+- PR #29: assessment and migration plan.
+- Issue #19: embeddings and topic grouping.
+- Issue #27: ranked-topic reading and top-20 presentation.
+- PR #10: previous article data contract, requiring a linked revision.
 
-## 1. Updated direction
+## 1. Week 44 scope
 
-On 2026-10-24, Mathias confirmed that we should adjust to
-Kisslo's proposed model using news, topics and posts.
+The current goal is to support a repeatable ranked top-20 topic
+workflow using collected articles.
 
-Further implementation of the earlier news_articles relationship
-is paused while the replacement model is agreed.
+This plan focuses on:
+- Preserving collected articles in public.news.
+- Defining topic storage and article-to-topic relationships.
+- Supporting embedding storage needed by issue #19.
+- Defining the backend read interface needed by issue #27.
+- Coordinating the transition with existing readers and writers.
+
+Posts, generated-output storage, article generation and publication
+are outside this week's scope.
 
 PR #29 remains an assessment and migration-plan PR.
-SQL implementation will be handled in a separate PR linked to #26,
-after its scope and the revised contract are agreed.
+Versioned SQL will be implemented in a separate PR linked to #26.
 
-The statement that news_articles will probably be dropped is not
-approval to delete the table or its records.
+The previous proposal to link news_articles to news is superseded
+as the implementation target. This does not authorize deletion of
+news_articles or its records.
 
-## 2. Current workflow
+## 2. Existing workflow and dependencies
 
-Mathias confirmed the current flow with Turker:
+The collector and uploader store cleaned articles in public.news.
 
-1. Python collects and cleans articles.
-2. Collected articles are stored in public.news.
-3. n8n reads articles from public.news.
-4. n8n categorizes them and writes results to public.news_articles.
+Earlier, Mathias reported that n8n reads public.news, categorizes
+articles and writes results to public.news_articles.
 
-The actual n8n workflow link or repository export still needs to
-be supplied and recorded here.
+A later update reports that n8n writes to RSS_feeds and groups
+records by source. Source grouping is not the same as grouping
+articles into related topics.
 
-We must inspect how the workflow carries the original news.id
-and identify its current readers and writers before changing it.
+These reports must be reconciled by inspecting the actual active
+workflows. Neither report alone establishes all current dependencies.
 
-The current workflow and the proposed replacement model must
-remain clearly distinguished.
+Before migration:
+- Obtain links or repository exports for the active n8n workflows.
+- Identify every affected reader and writer.
+- Record the tables and fields each component reads or writes.
+- Check how original news.id values are carried through processing.
+- Identify triggers, views, functions and scheduled jobs that depend
+  on affected tables.
+- Record which components must change and who owns each change.
+
+Do not stop workflows or change RSS_feeds based only on assumptions.
 
 ## 3. Historical inspection results
 
@@ -58,159 +76,289 @@ Read-only inspection on 2026-10-22 found:
 | Existing constraints | PRIMARY KEY (id), UNIQUE (link) |
 
 All 29 unmatched records had NULL published_at values.
-Their absence from news was not explained by this inspection.
 
 Existing categories included AI, Tech, Business, Startups and Other.
-These values do not establish verified classification completion.
+These values do not prove successful classification.
 
 The existing numeric IDs do not identify the same article across
 the two tables. For example, news_articles.id = 1 matched
 news.id = 1256 by link and title.
 
-These counts are historical, not current migration inputs.
-Repeat the inspection before any migration because the workflow
-may have added or changed records.
+A subsequent read-only check reported:
+- public.news: 1,954 records.
+- public.news_articles: 40 records.
+- Exact link matches: 15.
+- Unmatched records: 25.
 
-## 4. Proposed model
+The later link counts do not establish title agreement or category
+validity for all 15 matched records.
 
-The proposed table roles are:
+All figures above are historical observations.
+Refresh counts, schema and dependency checks before migration and
+record the execution date, queries and results.
 
-| Table | Intended role |
-|---|---|
-| news | Collected article metadata and RSS descriptions |
-| topics | Groups of related articles and topic ranking information |
-| posts | Content developed from selected topics and Kisslo's input |
+## 4. Proposed article-to-topic relationship
 
-Kisslo's proposal includes article embeddings and a topic reference
-in news, ranking information in topics, and editorial content and
-publication information in posts.
+The latest team proposal follows Kisslo's one-topic-per-article model:
 
-These are proposed responsibilities, not a completed schema.
-Exact columns, types, relationships, constraints and access rules
-must be documented in the revised contract before implementation.
+- One topic can contain many articles.
+- Each article can belong to at most one topic.
+- news.topic_id references the topic table's primary key.
+- No article/topic linking table is needed for this model.
 
-Keep original news.id values available throughout processing so
-generated content can be traced to its source articles.
+This document uses public.topics as the proposed table name.
+A teammate used the singular name topic; confirm the exact name
+before implementation.
 
-RSS descriptions must remain distinct from generated content.
+The proposed relationship is:
 
-## 5. Earlier design now on hold
+    public.news.topic_id -> public.topics.id
 
-The previous plan proposed:
+Do not make news.topic_id UNIQUE: several articles must be able to
+reference the same topic.
 
-- news_articles.news_id as a NOT NULL, UNIQUE foreign key.
-- news_articles.categorized_at as a completion marker.
-- public.content_articles as the Content read view.
-- Backfilling links from news_articles to news.
+Propose allowing news.topic_id to be NULL until grouping succeeds.
+This allows collection to continue before articles are grouped.
+The team must confirm this missing-value rule.
 
-These changes are not the current implementation plan following
-Mathias's updated direction.
+Keep original news.id values unchanged.
 
-Do not implement them solely to complete the old design.
-The team must decide whether any compatibility interface is still
-needed during the transition.
+Before implementation, agree:
+- Final table name and matching ID data types.
+- Foreign-key behavior when a topic is removed.
+- How articles are reassigned during regrouping.
+- How topic IDs behave when topics merge or split.
+- How failed or incomplete grouping is distinguished from success.
 
-PR #10 documented the earlier contract. The revised model and its
-effect on existing interfaces must be documented and reviewed.
+The relationship is proposed and awaits the team's final decision.
+No SQL has been applied.
 
-## 6. Existing data handling
+## 5. Proposed fields and ownership
 
-Preserve existing news and news_articles records during assessment.
+### news
 
-The historical 11 matches and 29 unmatched records remain useful
-inspection evidence, but they do not require immediate backfilling
-into a table that may be retired.
+Data owns collected metadata and RSS descriptions.
 
-Before retiring news_articles:
+Preserve existing fields and their meaning:
+- id
+- title
+- link
+- source
+- published
+- subject
+- description
+- collected_at
 
-- Identify its current writers, readers and dependencies.
-- Repeat the record and identity checks.
-- Export its data and record its schema and access configuration.
-- Agree whether legacy records should be retained, archived or migrated.
-- Record how any unmatched records will be handled.
+Kisslo's proposed additions are:
+- embedding
+- topic_id
 
-Do not invent publication dates or other missing metadata.
-Do not equate numeric IDs across tables.
-Do not delete unmatched records without explicit approval.
+The legacy subject column must not become a competing source of
+topic membership. Retain it until its dependencies and future
+treatment have been agreed.
 
-Table removal requires a separate, explicit decision after data
-preservation and dependent workflow changes have been verified.
+Topics owns the grouping results and embedding generation.
+The database migration provides the agreed storage and constraints.
 
-## 7. Proposed implementation sequence
+Before defining embedding storage, confirm:
+- Embedding model and vector dimensions.
+- Input text, including title and RSS description.
+- Handling of missing descriptions.
+- How the model and input version are recorded.
+- How missing, failed or outdated embeddings are identified.
+- Regeneration rules when the input or model changes.
+- Required database extension and its current installation state.
 
-1. Confirm the news/topics/posts model with the team.
-2. Revise the shared data contract and affected issue scopes.
-3. Obtain and inspect the actual n8n workflow.
-4. Refresh the read-only database assessment.
-5. Agree legacy-data preservation and recovery procedures.
-6. Define the new relationships and Content read interface.
-7. Prepare versioned SQL in a separate implementation PR.
-8. Test migrations and application changes in an isolated environment.
-9. Coordinate Python, n8n and Content reader changes.
-10. Apply the reviewed migration through an agreed deployment process.
-11. Verify the complete flow and source traceability.
-12. Consider retiring news_articles only after separate approval.
+### topics
 
-No table removal or production migration is performed by this
-documentation PR.
+Kisslo proposed these fields:
 
-## 8. Decisions for Monday
+- id
+- label
+- score
+- source_count
+- velocity
+- swedish_signal
+- first_seen
+- last_seen
+- status
 
-- What are the final columns and relationships for the three tables?
-- Can an article belong to one topic or several?
-- How are topic changes and regrouping handled?
-- How are successfully processed articles and failed attempts identified?
-- How will posts retain references to the exact source articles used?
-- What interface will Content use under the new model?
-- Is public.content_articles still needed for compatibility?
-- Which Python functions and n8n workflow steps must change?
-- How should the existing news_articles records be preserved?
-- Who owns each implementation and verification task?
+These are starting points for the shared contract, not a finalized
+schema. Agree types, defaults, allowed values and field meanings.
 
-If embeddings are included, also agree the model, dimensions,
-input text, missing-description handling, cost and regeneration rules.
+In particular, define:
+- Whether source_count counts distinct publishers or feed names.
+- The time window and calculation represented by velocity.
+- What swedish_signal measures.
+- Whether first_seen and last_seen refer to publication,
+  collection or processing time.
+- The score scale and when scores are refreshed.
+- Whether status represents processing or editorial state.
+- Any additional fields needed to identify results ready to read.
+
+Topics owns grouping and ranking calculations.
+Coordinate storage fields with their implementation.
+
+### posts
+
+Posts are deferred and are not created by this migration.
+
+RSS descriptions remain publisher-provided input.
+They must not be replaced by generated headlines or summaries.
+
+## 6. Ranked-topic read interface
+
+Agree a documented backend query or view with the owner of #27.
+
+A ranked_topics view was suggested in the meeting.
+Its exact name and definition remain to be confirmed.
+
+The interface must allow the reader to:
+- Retrieve eligible topics and their ranking information.
+- Retrieve the original news records linked to each topic.
+- Retain news.id for article traceability.
+- Read title, link, source, published and description from news.
+- Handle missing descriptions without losing article identity.
+- Distinguish incomplete results from results ready to present.
+
+Agree the output field names and types, eligibility rules,
+processing freshness, ordering and tie-breaking.
+
+The reader must request an explicit order when selecting the
+top 20; it must not rely on an implicit database row order.
+
+Keep topic selection separate from the number of linked articles:
+joining articles must not cause a row limit to select fewer topics.
+
+The database interface supports ranking results.
+The ranking algorithm and top-20 presentation are separate work.
+
+The old public.content_articles interface is not automatically
+retained. Check whether any deployed reader depends on it before
+deciding whether a temporary compatibility interface is needed.
+
+## 7. Existing data preservation
+
+Preserve existing news, news_articles and RSS_feeds data during
+assessment.
+
+Do not:
+- Delete unmatched or provisional records.
+- Invent publication dates or other missing metadata.
+- Equate numeric IDs from different tables.
+- Treat legacy category labels as verified topic assignments.
+- Convert old categories into new topic groups automatically.
+- Drop tables or populated columns as part of this planning PR.
+
+The new topic workflow does not require completing the old
+news_articles backfill solely to retire that design.
+
+Before any later retirement of legacy storage:
+1. Identify readers, writers and database dependencies.
+2. Export affected data and capture schema and access settings.
+3. Agree whether records remain, are archived or are migrated.
+4. Verify that replacement workflows work.
+5. Obtain and record a separate retirement decision.
+
+## 8. Migration sequence
+
+1. Confirm the revised scope of #26 and this plan.
+2. Agree the article-to-topic relationship and exact schema with
+   Topics and Content.
+3. Document the revised shared data contract.
+4. Inspect and link current readers, writers and n8n workflows.
+5. Refresh database counts, schema and dependency checks.
+6. Back up affected data, constraints, indexes, policies and grants.
+7. Prepare versioned SQL in a separate PR linked to #26.
+8. Test the migration and recovery in an isolated database.
+9. Test the writer and reader against the agreed interface.
+10. Coordinate deployment with active readers and writers.
+11. Apply the reviewed migration through the agreed process.
+12. Record post-migration verification and remaining work.
+
+Prefer additive changes that preserve existing records and IDs.
+
+Existing articles should remain ungrouped until the new grouping
+process assigns a valid topic; do not manufacture topic assignments
+during schema migration.
+
+PR #29 does not apply production SQL.
 
 ## 9. Access and recovery
 
-Inspect existing permissions, Row Level Security, policies and
-dependencies before implementing new tables or views.
+Inspect Row Level Security, policies and grants before creating
+tables, views or functions.
 
-Document backend reader and writer access.
+Document the backend roles allowed to:
+- Insert collected articles.
+- Write embeddings and topic assignments.
+- Write topic ranking results.
+- Read ranked topics and linked articles.
+
+A new view must not unintentionally expose data beyond the intended
+access rules.
+
 Keep credentials in environment variables or deployment secrets.
 
-Back up affected data and schema before migration.
-Test recovery without overwriting newer records.
+Test recovery before deployment.
+Use transactions where appropriate and roll back failed,
+uncommitted migration steps.
 
-Coordinate deployment and recovery with active writers and readers.
+After deployment, inspect new writes and dependencies before
+reversing changes. Do not restore an old backup over newer records
+or drop populated columns blindly.
 
-## 10. Verification requirements
+## 10. Verification
 
-The implementation PR must demonstrate that:
+The implementation PR must demonstrate:
 
-- Existing data is preserved according to the reviewed plan.
-- Article identities remain stable.
-- Relationships reject invalid references.
+- Existing article IDs and collected metadata are preserved.
+- A valid topic reference is accepted.
+- A nonexistent topic reference is rejected.
+- Multiple articles can reference the same topic.
+- Ungrouped articles are handled according to the agreed NULL rule.
 - Repeated processing does not create unintended duplicates.
-- Failed processing does not mark work as completed.
-- Topic membership and ranking follow the agreed rules.
-- Content reads metadata and descriptions from the correct articles.
-- Generated content retains its source references.
-- Missing descriptions are handled explicitly.
-- Permissions behave as documented.
-- Python, n8n and Content work together in a recorded test run.
+- Regrouping follows the agreed reassignment rules.
+- Embedding storage accepts the agreed dimensions.
+- Incomplete or failed processing is not presented as ready.
+- Ranked-topic ordering and tie-breaking are deterministic.
+- Linked metadata and descriptions belong to the correct news IDs.
+- Missing descriptions are handled clearly.
+- Reader and writer permissions behave as documented.
+- Existing collection remains compatible.
+- The grouping, ranking and Content reader work together in a
+  recorded test using the new interface.
 
-Record both isolated test results and post-migration verification.
-Passing local tests does not establish that production is migrated.
+Record isolated test results and live read-only verification after
+deployment. Passing CI alone does not prove that the database has
+been migrated.
 
-## 11. Issue and PR tracking
+## 11. Open decisions
 
-- PR #29: assessment, historical findings and revised migration plan.
-- Issue #26: database implementation scope to be revised for the new model.
-- Issue #19: workflow changes to be coordinated with Turker.
-- Issue #27: Content reading changes to be coordinated with Nedal.
-- Issue #28: generated-output storage to be reconciled with posts.
-- PR #10: existing contract to be updated or followed by a linked revision.
+- Confirm public.topics versus public.topic.
+- Confirm one-topic-per-article and nullable news.topic_id.
+- Agree topic deletion, regrouping and stable-ID rules.
+- Agree final fields, types, constraints and processing-state rules.
+- Confirm the embedding model, dimensions and update strategy.
+- Confirm ranked-topic interface name, fields and eligibility.
+- Identify and link all current readers and writers.
+- Resolve the reported n8n use of news_articles and RSS_feeds.
+- Assign implementation, deployment and verification owners.
 
-Link implementation PRs and verification evidence to the relevant issues.
+## 12. Tracking and completion
 
-Do not close #26 merely because this planning document is merged.
+- #26: database storage, relationships and backend read interface.
+- PR #29: assessment and migration planning only.
+- Separate implementation PR: versioned SQL and migration tests.
+- #19: embeddings and topic grouping, coordinated with storage.
+- #27: reading ranked topics and producing the top-20 presentation.
+- #28: generated-output storage paused for Week 44.
+- #30 / PR #31 and #33: further article-generation and separate
+  draft-review work paused for Week 44.
+
+Update the shared data contract and README so that the old model
+is not presented as the current implementation target.
+
+Keep #26 open until implementation, access instructions and
+verification evidence are linked. Merging PR #29 alone does not
+complete #26.

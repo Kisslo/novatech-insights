@@ -371,17 +371,18 @@ def format_cost(cost: float | None) -> str:
 def print_dry_run(
     model: str, system_prompt: str, prompt: str, max_output_tokens: int
 ) -> None:
-    """Show both prompts and the highest possible cost, without calling Claude."""
+    """Show both prompts and an estimated cost, without calling Claude."""
     print("\n--- System prompt ---")
     print(system_prompt)
     print("\n--- Prompt ---")
     print(prompt)
     print("--- End of prompt ---\n")
-    # Rough estimate: about 4 characters per token.
+    # Rough estimate: about 4 characters per token, and all max_output_tokens
+    # used. The real cost is usually lower but can differ in both directions.
     est_input = (len(system_prompt) + len(prompt)) // 4
-    max_cost = estimate_cost(model, est_input, max_output_tokens)
+    est_cost = estimate_cost(model, est_input, max_output_tokens)
     print(f"Estimated input tokens: ~{est_input}")
-    print(f"Max cost for this call: ~{format_cost(max_cost)}")
+    print(f"Estimated cost for this call: ~{format_cost(est_cost)}")
     print("Dry run: no call to Claude made.")
 
 

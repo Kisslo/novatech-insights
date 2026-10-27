@@ -9,6 +9,7 @@ from content_tools import (
     format_cost,
     paywall_from_json_ld,
     paywall_from_meta,
+    print_dry_run,
 )
 
 
@@ -183,6 +184,14 @@ def test_estimate_cost_known_model():
 )
 def test_format_cost(cost, expected):
     assert format_cost(cost).startswith(expected)
+
+
+def test_print_dry_run_says_estimated_cost(capsys):
+    print_dry_run("claude-sonnet-5-5", "system", "prompt", 1000)
+
+    out = capsys.readouterr().out
+    assert "Estimated cost for this call: ~$" in out
+    assert "Max cost" not in out
 
 
 # -------------------- Claude call

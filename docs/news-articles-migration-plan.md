@@ -304,36 +304,47 @@ Before implementing embedding storage, still agree:
 
 ### topics
 
-Kisslo's original proposal included:
-id, label, score, source_count, velocity, swedish_signal,
-first_seen, last_seen and status.
+Confirmed field requirements — 2026-10-28:
 
-The updated agreement is to calculate source_count when reading.
-Calculate article_count when reading as well.
-Do not add stored count columns for these values under this plan.
+| Field | Purpose | Owner |
+|---|---|---|
+| id | Stable topic identifier | Database |
+| score | Calculated topic ranking score | Mathias, #35 |
+| score_calculated_at | Time the score was calculated | Mathias, #35 |
+| score_version | Ranking formula version | Mathias, #35 |
+| score_breakdown | Signals and their contributions to the score | Mathias, #35 |
+| label | Generated topic headline | Nedal, #27 |
+| why_relevant_sv | Short relevance explanation in Swedish | Nedal, #27 |
+| llm_relevance | AI relevance rating on a scale of 1–5 | Nedal, #27 |
 
-The remaining proposed fields are:
-- id
-- label
-- score
-- velocity
-- swedish_signal
-- first_seen
-- last_seen
-- status
+Use llm_relevance consistently instead of relevance.
+Whether llm_relevance contributes to the ranking formula remains
+an open decision under #35.
 
-These require agreed types, defaults and meanings.
+Ranking inputs come from news through the article-topic linking table.
+Keep original article metadata unchanged.
 
-In particular, define:
-- The score scale and refresh rules.
-- The calculation and time window represented by velocity.
-- What swedish_signal measures.
-- Whether first_seen and last_seen refer to publication,
-  collection or processing time.
-- Whether status represents processing state or editorial state.
+Calculate article_count and source_count when reading.
+source_count counts distinct sources across all articles in the
+agreed topic scope, not only the displayed articles.
+Calculate rank_in_topic when retrieving selected articles.
+Do not store these three calculated values separately.
+
+Before SQL implementation, agree:
+- Field types, defaults and nullability.
+- Whether llm_relevance allows only integers or also decimals.
+- Handling of missing or failed topic labelling and scoring.
+- Score scale, refresh rules and score_breakdown structure.
+- How stored labels and scores are invalidated after regrouping.
+
+Earlier proposed fields velocity, swedish_signal, first_seen,
+last_seen and status are not confirmed as separate stored columns.
+Agree whether they are needed separately, derived when reading,
+or represented within score_breakdown where appropriate.
 
 Mathias owns ranking signals and the score formula.
-Coordinate their storage with Topics and the reader implementation.
+Nedal owns generated labels, relevance explanations and AI ratings.
+Nosheen provides the agreed storage, constraints and documentation.
 
 ### Article-topic linking table
 
@@ -361,6 +372,19 @@ ranked_topics is a suggested name, not a finalized interface name.
 
 The interface must support ranked topics and original articles
 connected through the article-topic linking table.
+
+### Reader field requirements — confirmed 2026-10-28
+
+Nedal needs to read:
+- Per topic: id, score, source_count and article_count.
+- Per selected article: news_id, title, source, link and description.
+
+Nedal writes label, why_relevant_sv and llm_relevance.
+llm_relevance uses a scale of 1–5 and replaces the earlier name relevance.
+
+The example below uses topic_id to show article-topic connections.
+Agree whether the final topic result exposes id or aliases it
+as topic_id, and use the chosen naming consistently.
 
 ### Agreed behavior
 
@@ -396,9 +420,13 @@ of selected topics.
 Queries must use explicit ordering rather than rely on implicit
 database row order.
 
-The documented Week 44 target is currently a top-20 presentation.
-Mathias has also proposed top five. Confirm whether that changes
-this week's acceptance criteria or only a later delivery size.
+Support a configurable number of selected topics, such as 20 or 5.
+Nedal confirmed that top five means five topics, with up to three
+selected articles within each topic.
+
+The documented Week 44 acceptance target remains top 20 unless
+the team explicitly changes it. The exact rule for selecting
+and ordering the three articles remains open.
 
 ### Proposed output example
 
@@ -509,6 +537,22 @@ After deployment, inspect new writes and dependencies before
 reversing changes. Do not restore an old backup over newer records
 or drop populated columns blindly.
 
+### Access inspection — 2026-10-28
+
+Read-only inspection found:
+- RLS is enabled on news, news_articles and rss_feeds.
+- No RLS policies were returned for these tables.
+- anon, authenticated and service_role each have SELECT,
+  INSERT, UPDATE, DELETE, REFERENCES, TRIGGER and TRUNCATE grants
+  on all three tables.
+
+These findings describe configuration, not tested effective access.
+Review the broad grants, including TRUNCATE, and agree the required
+backend permissions before implementing the new schema.
+Do not copy these grants automatically to new tables.
+
+No permissions or policies were changed during this assessment.
+
 ## 10. Verification
 
 The implementation PR must demonstrate:
@@ -561,8 +605,11 @@ deployment. Passing CI alone does not prove migration.
 - Ranked-topic interface name and complete output fields.
 - Topic eligibility, freshness and time-window rules.
 - Source identity rules for distinct-source counting.
-- Whether top five replaces top 20 or is a later delivery size.
-- Actual readers, writers and active n8n workflow dependencies.
+- Confirm any change to the Week 44 top-20 acceptance target.
+  The reader supports configurable topic counts, including five,
+  with up to three articles per topic.
+- Final readers and writers after the n8n redesign.
+  The inspected n8n workflow is inactive and provisional.
 - Implementation, deployment and verification owners.
 
 Multiple topics per article is a confirmed requirement.

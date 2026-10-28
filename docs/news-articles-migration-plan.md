@@ -288,10 +288,14 @@ Retain it until its dependencies and future treatment are agreed.
 
 Turker owns embedding generation and topic grouping under #19.
 Nosheen provides the agreed storage, constraints and documentation.
+Turker confirmed on 2026-10-28:
+- Embedding model: paraphrase-multilingual-MiniLM-L12-v2.
+- Vector dimensions: 384.
+- Input text: article title and RSS description.
 
-Before defining embedding storage, confirm:
-- Embedding model and vector dimensions.
-- Input text, including title and RSS description.
+The proposed linking-table name topic_articles remains unconfirmed.
+
+Before implementing embedding storage, still agree:
 - Missing-description handling.
 - Model and input version tracking.
 - Identification of missing, failed or outdated embeddings.
@@ -553,7 +557,7 @@ deployment. Passing CI alone does not prove migration.
 - Whether to store similarity and how it would be defined.
 - Exact top-three selection rule and tie-breaking.
 - Final field types, constraints and processing-state rules.
-- Embedding model, dimensions and update strategy.
+- Embedding update strategy, version tracking and missing-description handling.
 - Ranked-topic interface name and complete output fields.
 - Topic eligibility, freshness and time-window rules.
 - Source identity rules for distinct-source counting.

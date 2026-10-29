@@ -79,3 +79,19 @@ This verifies the example query on a small fixture.
 It does not verify a deployed read interface.
 Article ID ordering is for testing only; the final article-selection
 rule remains open.
+### Automated assertions — 2026-10-29
+
+Updated sql/test_topic_counts.sql to raise an exception when
+expected results are incorrect.
+
+Verified locally:
+- Exactly three distinct articles are displayed.
+- All displayed articles come from Source A.
+- Full counts remain four articles and two sources.
+- Article positions are 1, 2 and 3.
+
+Result: PASS: all topic-count assertions passed.
+Test records were rolled back.
+
+These assertions test the example query, not a deployed read
+interface. They have not been integrated into CI.

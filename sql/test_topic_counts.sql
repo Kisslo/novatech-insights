@@ -1,5 +1,6 @@
 -- Local test only. All test records are rolled back.
--- ID order is only for this test, not the agreed selection rule.
+-- ID ordering is for testing, not the final selection rule.
+\set ON_ERROR_STOP on
 
 BEGIN;
 
@@ -33,17 +34,7 @@ SELECT t.id, a.id
 FROM test_topic_ids AS t
 CROSS JOIN new_articles AS a;
 
--- Count every article and distinct source in the test topic.
-SELECT
-    ta.topic_id,
-    count(DISTINCT n.id) AS article_count,
-    count(DISTINCT n.source) AS source_count
-FROM public.topic_articles AS ta
-JOIN public.news AS n ON n.id = ta.news_id
-JOIN test_topic_ids AS t ON t.id = ta.topic_id
-GROUP BY ta.topic_id;
-
--- Calculate full counts before limiting displayed articles.
+CREATE TEMP TABLE test_display_results ON COMMIT DROP AS
 WITH topic_counts AS (
     SELECT
         ta.topic_id,
@@ -77,7 +68,51 @@ SELECT
     c.source_count
 FROM selected_articles AS a
 JOIN topic_counts AS c ON c.topic_id = a.topic_id
-WHERE a.rank_in_topic <= 3
-ORDER BY a.topic_id, a.rank_in_topic;
+WHERE a.rank_in_topic <= 3;
+
+DO $test$
+BEGIN
+    IF (SELECT count(*) FROM test_display_results) <> 3 THEN
+        RAISE EXCEPTION 'FAIL: expected 3 displayed articles';
+    END IF;
+
+    IF (SELECT count(DISTINCT news_id)
+        FROM test_display_results) <> 3 THEN
+        RAISE EXCEPTION 'FAIL: displayed articles must be distinct';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM test_display_results
+        WHERE article_count IS DISTINCT FROM 4::bigint
+           OR source_count IS DISTINCT FROM 2::bigint
+    ) THEN
+        RAISE EXCEPTION
+            'FAIL: full counts must remain 4 articles and 2 sources';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM test_display_results
+        WHERE source IS DISTINCT FROM 'Source A'
+    ) THEN
+        RAISE EXCEPTION
+            'FAIL: only Source A articles should be displayed';
+    END IF;
+
+    IF (
+        SELECT array_agg(rank_in_topic ORDER BY rank_in_topic)
+        FROM test_display_results
+    ) IS DISTINCT FROM ARRAY[1, 2, 3]::bigint[] THEN
+        RAISE EXCEPTION 'FAIL: expected article positions 1, 2 and 3';
+    END IF;
+
+    RAISE NOTICE 'PASS: all topic-count assertions passed';
+END;
+$test$;
+
+SELECT *
+FROM test_display_results
+ORDER BY topic_id, rank_in_topic;
 
 ROLLBACK;

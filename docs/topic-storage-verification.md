@@ -95,3 +95,14 @@ Test records were rolled back.
 
 These assertions test the example query, not a deployed read
 interface. They have not been integrated into CI.
+
+### GitHub Actions verification — 2026-10-29
+
+The "PostgreSQL migrations and topic counts" job passed on PR #39.
+
+It applied migrations 001, 002 and 003 to an empty temporary
+PostgreSQL database and ran the topic-count assertions.
+
+This verifies fresh-database migration execution and the example
+count query. It does not verify production deployment, backend
+permissions or the final ranked-topic read interface.

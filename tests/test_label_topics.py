@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from content_tools import ClaudeError
 from src.label_topics import (
     DEFAULT_FIXTURE,
     build_prompt,
@@ -9,8 +10,14 @@ from src.label_topics import (
     load_fixture,
     main,
     normalize_topic,
+    parse_label_reply,
     render_markdown,
     select_top,
+)
+
+GOOD_REPLY = (
+    '{"label": "Ny AI-vägledning", '
+    '"why_relevant_sv": "Viktigt för småföretag.", "llm_relevance": 4}'
 )
 
 
@@ -131,6 +138,49 @@ def test_run_cost_for_twenty_topics_is_below_limit():
     assert estimate_run_cost("unknown-model", prompts) is None
 
 
+# -------------------- Claude reply
+
+
+def test_parse_reply_reads_all_fields():
+    assert parse_label_reply(GOOD_REPLY) == {
+        "label": "Ny AI-vägledning",
+        "why_relevant_sv": "Viktigt för småföretag.",
+        "llm_relevance": 4,
+    }
+
+
+def test_parse_reply_accepts_code_fence_and_tidies_whitespace():
+    reply = (
+        '```json\n{"label": "  Ny   rubrik ", "why_relevant_sv": "En\\nmening.", '
+        '"llm_relevance": 2}\n```'
+    )
+
+    result = parse_label_reply(reply)
+
+    assert result["label"] == "Ny rubrik"
+    assert result["why_relevant_sv"] == "En mening."
+
+
+@pytest.mark.parametrize(
+    ("reply", "reason"),
+    [
+        ("Sorry, I cannot help.", "no JSON object"),
+        ('{"label": "A", "why_relevant_sv": "B", "llm_relevance": }', "not valid"),
+        ('{"why_relevant_sv": "B", "llm_relevance": 3}', "'label'"),
+        ('{"label": " ", "why_relevant_sv": "B", "llm_relevance": 3}', "'label'"),
+        ('{"label": "A", "why_relevant_sv": "", "llm_relevance": 3}', "why_relevant"),
+        ('{"label": "A", "why_relevant_sv": "B", "llm_relevance": 6}', "between"),
+        ('{"label": "A", "why_relevant_sv": "B", "llm_relevance": 0}', "between"),
+        ('{"label": "A", "why_relevant_sv": "B", "llm_relevance": 3.5}', "whole"),
+        ('{"label": "A", "why_relevant_sv": "B", "llm_relevance": "4"}', "whole"),
+        ('{"label": "A", "why_relevant_sv": "B", "llm_relevance": true}', "whole"),
+    ],
+)
+def test_parse_reply_rejects_unusable_answers(reply, reason):
+    with pytest.raises(ValueError, match=reason):
+        parse_label_reply(reply)
+
+
 # -------------------- output
 
 
@@ -162,6 +212,16 @@ def test_markdown_placeholders_and_counted_values():
     assert "Källor: minst 2 · Artiklar: minst 2" in text
 
 
+def test_markdown_marks_failed_topic_with_its_error():
+    topics = [normalize_topic(make_topic(1, 0.5)), normalize_topic(make_topic(2, 0.4))]
+
+    text = render_markdown(topics, {}, 20, "fixture", {2: "Rate limit reached."})
+
+    assert "## 2. (rubrik saknas)" in text
+    assert "Fel: Rate limit reached." in text
+    assert "Misslyckade ämnen: 1" in text
+
+
 # -------------------- main
 
 
@@ -171,7 +231,7 @@ def test_dry_run_prints_prompts_and_preview(monkeypatch, capsys):
     def no_call(*args, **kwargs):
         raise AssertionError("Claude must not be called in a dry run")
 
-    monkeypatch.setattr("content_tools.call_claude", no_call)
+    monkeypatch.setattr("src.label_topics.call_claude", no_call)
 
     main()
 
@@ -202,3 +262,72 @@ def test_broken_fixture_stops_with_clear_message(tmp_path, monkeypatch):
         main()
 
     assert "Could not read topics" in str(stopped.value)
+
+
+# -------------------- real run (Claude is always mocked)
+
+
+def fake_claude(replies):
+    """Return a stand-in for call_claude that answers from a list, in order."""
+    answers = iter(replies)
+
+    def call(model, system_prompt, prompt, effort, max_tokens):
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer, 300, 100
+
+    return call
+
+
+def test_run_saves_list_and_continues_after_failed_topics(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr("src.label_topics.OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(
+        "src.label_topics.call_claude",
+        fake_claude([GOOD_REPLY, ClaudeError("Rate limit reached."), "not json"]),
+    )
+    monkeypatch.setattr("sys.argv", ["label_topics.py", "--top", "3"])
+
+    main()
+
+    out = capsys.readouterr().out
+    assert "FAILED topic 102: Rate limit reached." in out
+    assert "FAILED topic 103: invalid answer" in out
+    assert "Labelled: 1 of 3" in out
+    saved = list(tmp_path.glob("top3_*.md"))
+    assert len(saved) == 1
+    text = saved[0].read_text(encoding="utf-8")
+    assert "## 1. Ny AI-vägledning" in text
+    assert "AI-relevans: 4/5" in text
+    assert "## 2. (rubrik saknas)" in text
+    assert "(news_id 1001)" in text
+    assert "<!-- model:" in text
+
+
+def test_run_saves_nothing_when_every_topic_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.label_topics.OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(
+        "src.label_topics.call_claude",
+        fake_claude([ClaudeError("ANTHROPIC_API_KEY is missing.")] * 2),
+    )
+    monkeypatch.setattr("sys.argv", ["label_topics.py", "--top", "2"])
+
+    with pytest.raises(SystemExit) as stopped:
+        main()
+
+    assert "nothing was saved" in str(stopped.value)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_run_stops_before_calls_when_cost_is_too_high(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.label_topics.OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr("src.label_topics.MAX_COST_USD", 0.0001)
+    monkeypatch.setattr("src.label_topics.call_claude", fake_claude([]))
+    monkeypatch.setattr("sys.argv", ["label_topics.py", "--top", "2"])
+
+    with pytest.raises(SystemExit) as stopped:
+        main()
+
+    assert "above the limit" in str(stopped.value)

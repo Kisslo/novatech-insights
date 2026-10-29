@@ -37,3 +37,30 @@ Dummy vectors were used; no real embeddings were generated.
 - Test against the intended deployment versions.
 - Update the data contract and obtain review.
 - Record deployment verification after an approved migration.
+
+## Topic storage tests — 2026-10-29
+
+Applied sql/003_create_topics_and_links.sql successfully in
+the local novatech_test database.
+
+| Check | Result |
+|---|---|
+| One article can belong to two topics | Passed |
+| Duplicate article-topic pairs are rejected | Passed |
+| References to missing articles are rejected | Passed |
+| References to missing topics are rejected | Passed |
+| llm_relevance = 6 is rejected | Passed |
+| llm_relevance values 1 and 5 are accepted | Passed |
+| A score without its supporting fields is rejected | Passed |
+| All four score fields can be saved together | Passed |
+
+Test records were rolled back. Failed transactions were rolled
+back when their connections closed.
+
+These are manual local tests, not production verification.
+Table names, field types and the requirement to save all four
+score fields together remain proposals for team review.
+
+Read-interface behavior, backend permissions, deletion protection
+and the remaining constraints still require testing.
+No changes have been applied to Supabase.

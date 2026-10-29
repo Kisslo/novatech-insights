@@ -4,8 +4,18 @@ Reads ranked topics with their best articles (max 3 per topic), asks Claude
 for a Swedish label, a short "why it matters" text and a relevance score
 (1-5) per topic, and writes the list as Markdown for Kisslo.
 
-Reads from tests/fixtures/sample_topics.json for now; --source supabase
-comes next. The list is saved in output/top<N>_<date>_<time>.md.
+Sources:
+- `--source fixture` (default): tests/fixtures/sample_topics.json.
+- `--source supabase`: two read-only views, names set in .env:
+    TOPICS_OVERVIEW_VIEW (default topic_overview):
+        id, score, article_count, source_count
+    TOPICS_ARTICLES_VIEW (default topic_top_articles):
+        topic_id, news_id, title, source, link, description, rank_in_topic
+  Topics are limited to --top before their articles are read, and only
+  articles with rank_in_topic 1-3 are read. Only the read functions depend
+  on the schema (#26). Supabase is only read, never written.
+
+The list is saved in output/top<N>_<date>_<time>.md.
 
 Input format (one topic):
     {"id": 101, "score": 0.91, "article_count": 7, "source_count": 4,
@@ -34,9 +44,13 @@ Examples:
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
@@ -56,6 +70,10 @@ MAX_ARTICLES_PER_TOPIC = 3
 MAX_OUTPUT_TOKENS = 800  # per topic, ceiling for thinking + answer
 DEFAULT_EFFORT = "low"
 MAX_COST_USD = 0.5  # estimated cost per run must stay below this
+DEFAULT_OVERVIEW_VIEW = "topic_overview"
+DEFAULT_ARTICLES_VIEW = "topic_top_articles"
+VIEW_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+SUPABASE_TIMEOUT_SECONDS = 30
 
 SYSTEM_PROMPT = """You are an editor for Novatech Solutions, a Swedish IT company.
 Novatech writes in Swedish about AI, automation and regulation for small
@@ -131,6 +149,102 @@ def load_fixture(path: Path) -> list[dict]:
     with path.open(encoding="utf-8") as f:
         data = json.load(f)
     return [normalize_topic(topic) for topic in data["topics"]]
+
+
+class ReadError(Exception):
+    """Ranked topics could not be read. The message is written for the user."""
+
+
+def view_name(env_var: str, default: str) -> str:
+    """Read a view name from the environment and check that it is a plain name."""
+    name = os.getenv(env_var, default).strip()
+    if not VIEW_NAME_PATTERN.fullmatch(name):
+        raise ReadError(f"{env_var} is not a valid view name: '{name}'")
+    return name
+
+
+def supabase_get(base_url: str, key: str, view: str, params: dict) -> list[dict]:
+    """GET rows from one Supabase view through the REST API (read only)."""
+    query = urlencode(params, safe="(),.")
+    request = Request(
+        f"{base_url.rstrip('/')}/rest/v1/{view}?{query}",
+        headers={"apikey": key, "Authorization": f"Bearer {key}"},
+    )
+    try:
+        with urlopen(request, timeout=SUPABASE_TIMEOUT_SECONDS) as response:
+            rows = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        if error.code == 404:
+            raise ReadError(
+                f"View '{view}' was not found in Supabase. "
+                "Check the view name in .env (the read interface is part of #26)."
+            ) from error
+        if error.code in (401, 403):
+            raise ReadError(
+                f"Supabase refused access to '{view}' (HTTP {error.code}). "
+                "Check SUPABASE_KEY in .env."
+            ) from error
+        raise ReadError(f"Supabase answered HTTP {error.code} for '{view}'.") from error
+    except (URLError, OSError) as error:
+        raise ReadError(f"Could not reach Supabase ({error}).") from error
+    except json.JSONDecodeError as error:
+        raise ReadError(f"Supabase did not answer with JSON for '{view}'.") from error
+    if not isinstance(rows, list):
+        raise ReadError(f"Unexpected answer from Supabase for '{view}'.")
+    return rows
+
+
+def load_supabase(top: int) -> list[dict]:
+    """Read the top ranked topics and their best 3 articles from Supabase.
+
+    Topics without articles are reported and left out of the list.
+    """
+    base_url = os.getenv("SUPABASE_URL", "").strip()
+    key = os.getenv("SUPABASE_KEY", "").strip()
+    if not base_url or not key:
+        raise ReadError("SUPABASE_URL and SUPABASE_KEY must be set in .env.")
+    overview = view_name("TOPICS_OVERVIEW_VIEW", DEFAULT_OVERVIEW_VIEW)
+    articles_view = view_name("TOPICS_ARTICLES_VIEW", DEFAULT_ARTICLES_VIEW)
+
+    # Choose the topics first, so the article rows cannot reduce the topic count.
+    topic_rows = supabase_get(
+        base_url,
+        key,
+        overview,
+        {
+            "select": "id,score,article_count,source_count",
+            "score": "not.is.null",
+            "order": "score.desc,id.asc",
+            "limit": str(top),
+        },
+    )
+    if not topic_rows:
+        return []
+
+    ids = ",".join(str(row["id"]) for row in topic_rows)
+    article_rows = supabase_get(
+        base_url,
+        key,
+        articles_view,
+        {
+            "select": "topic_id,news_id,title,source,link,description,rank_in_topic",
+            "topic_id": f"in.({ids})",
+            "rank_in_topic": f"lte.{MAX_ARTICLES_PER_TOPIC}",
+            "order": "topic_id.asc,rank_in_topic.asc",
+        },
+    )
+    by_topic: dict = {}
+    for row in article_rows:
+        by_topic.setdefault(row["topic_id"], []).append(row)
+
+    topics = []
+    for row in topic_rows:
+        articles = by_topic.get(row["id"], [])
+        if not articles:
+            print(f"Skipped topic {row['id']}: no articles in '{articles_view}'.")
+            continue
+        topics.append(normalize_topic({**row, "articles": articles}))
+    return topics
 
 
 def select_top(topics: list[dict], top: int) -> list[dict]:
@@ -307,9 +421,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--source",
-        choices=["fixture"],
+        choices=["fixture", "supabase"],
         default="fixture",
-        help="Where to read ranked topics from (supabase comes later)",
+        help="Where to read ranked topics from (default: fixture)",
     )
     parser.add_argument(
         "--fixture",
@@ -334,11 +448,16 @@ def main() -> None:
     model = os.getenv("CONTENT_WRITER_MODEL", "claude-sonnet-5-5")
     effort = os.getenv("CONTENT_WRITER_EFFORT", DEFAULT_EFFORT)
 
-    if not args.fixture.exists():
-        sys.exit(f"Fixture not found: {args.fixture}")
     try:
-        topics = load_fixture(args.fixture)
-    except (ValueError, KeyError, json.JSONDecodeError) as error:
+        if args.source == "supabase":
+            topics = load_supabase(args.top)
+        elif args.fixture.exists():
+            topics = load_fixture(args.fixture)
+        else:
+            sys.exit(f"Fixture not found: {args.fixture}")
+    except ReadError as error:
+        sys.exit(str(error))
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
         sys.exit(f"Could not read topics: {error}")
 
     selected = select_top(topics, args.top)

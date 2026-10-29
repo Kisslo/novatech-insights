@@ -1,13 +1,18 @@
+import io
 import json
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from content_tools import ClaudeError
 from src.label_topics import (
     DEFAULT_FIXTURE,
+    ReadError,
     build_prompt,
     estimate_run_cost,
     load_fixture,
+    load_supabase,
     main,
     normalize_topic,
     parse_label_reply,
@@ -331,3 +336,193 @@ def test_run_stops_before_calls_when_cost_is_too_high(tmp_path, monkeypatch):
         main()
 
     assert "above the limit" in str(stopped.value)
+
+
+# -------------------- Supabase (the REST API is always mocked)
+
+OVERVIEW_ROWS = [
+    {"id": 5, "score": 0.9, "article_count": 4, "source_count": 3},
+    {"id": 8, "score": 0.7, "article_count": 1, "source_count": 1},
+    {"id": 9, "score": 0.6, "article_count": 0, "source_count": 0},
+]
+ARTICLE_ROWS = [
+    {
+        "topic_id": 5,
+        "news_id": 101,
+        "title": "First",
+        "source": "A",
+        "link": "https://example.com/101",
+        "description": None,
+        "rank_in_topic": 1,
+    },
+    {
+        "topic_id": 5,
+        "news_id": 102,
+        "title": "Second",
+        "source": "B",
+        "link": "https://example.com/102",
+        "description": "Text",
+        "rank_in_topic": 2,
+    },
+    {
+        "topic_id": 8,
+        "news_id": 101,
+        "title": "First",
+        "source": "A",
+        "link": "https://example.com/101",
+        "description": "",
+        "rank_in_topic": 1,
+    },
+]
+
+
+@pytest.fixture
+def supabase_env(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
+    monkeypatch.setenv("SUPABASE_KEY", "test-key")
+    monkeypatch.delenv("TOPICS_OVERVIEW_VIEW", raising=False)
+    monkeypatch.delenv("TOPICS_ARTICLES_VIEW", raising=False)
+
+
+def fake_urlopen(answers, requests):
+    """Stand-in for urlopen: records each request, answers by view name."""
+
+    def call(request, timeout):
+        requests.append(request)
+        view = urlparse(request.full_url).path.rsplit("/", 1)[-1]
+        answer = answers[view]
+        if isinstance(answer, Exception):
+            raise answer
+        return io.BytesIO(json.dumps(answer).encode("utf-8"))
+
+    return call
+
+
+def test_supabase_reads_topics_then_their_top_three_articles(
+    supabase_env, monkeypatch, capsys
+):
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen",
+        fake_urlopen(
+            {"topic_overview": OVERVIEW_ROWS, "topic_top_articles": ARTICLE_ROWS},
+            requests,
+        ),
+    )
+
+    topics = load_supabase(top=3)
+
+    assert [t["id"] for t in topics] == [5, 8]
+    assert [a["news_id"] for a in topics[0]["articles"]] == [101, 102]
+    assert topics[0]["articles"][0]["description"] == ""
+    assert topics[0]["article_count"] == 4
+    assert topics[1]["articles"][0]["news_id"] == 101
+    assert "Skipped topic 9: no articles" in capsys.readouterr().out
+
+    first, second = (parse_qs(urlparse(r.full_url).query) for r in requests)
+    assert requests[0].full_url.startswith(
+        "https://project.supabase.co/rest/v1/topic_overview?"
+    )
+    assert first["order"] == ["score.desc,id.asc"]
+    assert first["score"] == ["not.is.null"]
+    assert first["limit"] == ["3"]
+    assert second["topic_id"] == ["in.(5,8,9)"]
+    assert second["rank_in_topic"] == ["lte.3"]
+    assert requests[0].get_method() == "GET"
+    assert requests[0].get_header("Apikey") == "test-key"
+
+
+def test_supabase_view_names_come_from_environment(supabase_env, monkeypatch):
+    monkeypatch.setenv("TOPICS_OVERVIEW_VIEW", "ranked_topics")
+    monkeypatch.setenv("TOPICS_ARTICLES_VIEW", "ranked_articles")
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen",
+        fake_urlopen(
+            {"ranked_topics": OVERVIEW_ROWS[:1], "ranked_articles": ARTICLE_ROWS[:1]},
+            requests,
+        ),
+    )
+
+    assert [t["id"] for t in load_supabase(top=1)] == [5]
+    assert "/rest/v1/ranked_topics?" in requests[0].full_url
+    assert "/rest/v1/ranked_articles?" in requests[1].full_url
+
+
+def test_supabase_with_no_ranked_topics_reads_no_articles(supabase_env, monkeypatch):
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen", fake_urlopen({"topic_overview": []}, requests)
+    )
+
+    assert load_supabase(top=20) == []
+    assert len(requests) == 1
+
+
+def test_supabase_rejects_unsafe_view_name(supabase_env, monkeypatch):
+    monkeypatch.setenv("TOPICS_OVERVIEW_VIEW", "topics?select=*")
+
+    with pytest.raises(ReadError, match="not a valid view name"):
+        load_supabase(top=5)
+
+
+def test_supabase_needs_url_and_key(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.setenv("SUPABASE_KEY", "test-key")
+
+    with pytest.raises(ReadError, match="SUPABASE_URL and SUPABASE_KEY"):
+        load_supabase(top=5)
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (HTTPError("u", 404, "Not Found", {}, None), "was not found"),
+        (HTTPError("u", 401, "Unauthorized", {}, None), "Check SUPABASE_KEY"),
+        (HTTPError("u", 500, "Server Error", {}, None), "HTTP 500"),
+        (URLError("no network"), "Could not reach Supabase"),
+    ],
+)
+def test_supabase_errors_have_clear_messages(supabase_env, monkeypatch, error, message):
+    monkeypatch.setattr(
+        "src.label_topics.urlopen", fake_urlopen({"topic_overview": error}, [])
+    )
+
+    with pytest.raises(ReadError, match=message):
+        load_supabase(top=5)
+
+
+def test_main_with_supabase_source_stops_on_read_error(supabase_env, monkeypatch):
+    error = HTTPError("u", 404, "Not Found", {}, None)
+    monkeypatch.setattr(
+        "src.label_topics.urlopen", fake_urlopen({"topic_overview": error}, [])
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["label_topics.py", "--source", "supabase", "--dry-run"]
+    )
+
+    with pytest.raises(SystemExit) as stopped:
+        main()
+
+    assert "View 'topic_overview' was not found" in str(stopped.value)
+
+
+def test_main_dry_run_with_supabase_source(supabase_env, monkeypatch, capsys):
+    monkeypatch.setattr(
+        "src.label_topics.urlopen",
+        fake_urlopen(
+            {"topic_overview": OVERVIEW_ROWS, "topic_top_articles": ARTICLE_ROWS},
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["label_topics.py", "--source", "supabase", "--top", "3", "--dry-run"],
+    )
+
+    main()
+
+    out = capsys.readouterr().out
+    assert "Källa: supabase" in out
+    assert "(news_id 102)" in out
+    assert "Only 2 topics available (asked for 3)." in out

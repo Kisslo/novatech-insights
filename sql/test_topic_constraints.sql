@@ -95,8 +95,41 @@ BEGIN
         WHEN foreign_key_violation THEN
             NULL; -- Expected rejection.
     END;
+    -- An article with topic memberships cannot be deleted.
+    BEGIN
+        DELETE FROM public.news
+        WHERE id = article_id;
 
-    -- Failed inserts must not change the valid memberships.
+        RAISE EXCEPTION 'FAIL: linked article deletion was accepted';
+    EXCEPTION
+        WHEN foreign_key_violation THEN
+            NULL; -- Expected rejection.
+    END;
+
+    -- A topic with article memberships cannot be deleted.
+    BEGIN
+        DELETE FROM public.topics
+        WHERE id = first_topic_id;
+
+        RAISE EXCEPTION 'FAIL: linked topic deletion was accepted';
+    EXCEPTION
+        WHEN foreign_key_violation THEN
+            NULL; -- Expected rejection.
+    END;
+
+    -- Both parent records must still exist.
+    IF NOT EXISTS (
+        SELECT 1 FROM public.news WHERE id = article_id
+    ) THEN
+        RAISE EXCEPTION 'FAIL: linked article was not preserved';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM public.topics WHERE id = first_topic_id
+    ) THEN
+        RAISE EXCEPTION 'FAIL: linked topic was not preserved';
+    END IF;
+    -- Failed inserts and deletes must not change the valid memberships.
     SELECT count(*)
     INTO link_count
     FROM public.topic_articles

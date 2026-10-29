@@ -64,3 +64,18 @@ score fields together remain proposals for team review.
 Read-interface behavior, backend permissions, deletion protection
 and the remaining constraints still require testing.
 No changes have been applied to Supabase.
+## Topic count query — 2026-10-29
+
+Ran sql/test_topic_counts.sql in the local test database.
+
+- Created four articles: three from Source A and one from Source B.
+- Displayed only the three Source A articles.
+- article_count remained 4.
+- source_count remained 2, including the undisplayed source.
+- rank_in_topic returned positions 1, 2 and 3.
+- All test records were rolled back.
+
+This verifies the example query on a small fixture.
+It does not verify a deployed read interface.
+Article ID ordering is for testing only; the final article-selection
+rule remains open.

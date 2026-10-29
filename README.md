@@ -464,3 +464,37 @@ all options.
 
 Summaries are stored temporarily as Markdown files in `output/summaries/`,
 which is ignored by Git. Database storage is planned in issue #5.
+
+## Topic Labels and Top-N List
+
+`src/label_topics.py` reads ranked topics with their best articles
+(max 3 per topic), asks Claude for a Swedish label, a short explanation
+of why the topic matters (`why_relevant_sv`) and a relevance rating from
+1 to 5 (`llm_relevance`), and writes a top-N list as Markdown (issue #27).
+
+```powershell
+uv run python src/label_topics.py --top 5 --dry-run
+uv run python src/label_topics.py --top 5
+uv run python src/label_topics.py --source supabase --top 20 --dry-run
+```
+
+- `--source fixture` (default) reads `tests/fixtures/sample_topics.json`.
+- `--source supabase` reads two views through the Supabase REST API.
+  Their names are set in `.env` with `TOPICS_OVERVIEW_VIEW`
+  (default `topic_overview`) and `TOPICS_ARTICLES_VIEW`
+  (default `topic_top_articles`). The views are part of issue #26.
+  Supabase is only read, never written.
+- `--top` sets the number of topics (default 20, e.g. 5 for Telegram).
+- `--dry-run` shows the prompts, a preview of the list and the estimated
+  cost without calling Claude. No API key is needed.
+
+A real run makes one Claude call per topic and needs `ANTHROPIC_API_KEY`
+in `.env`. It stops before any call if the estimated cost is above
+0.5 USD. A topic that fails is reported in the terminal and in the list,
+and the run continues with the next topic.
+
+The list is saved in `output/top<N>_<date>_<time>.md`, which is ignored
+by Git. Each topic shows its rank, label, score, number of sources and
+articles, AI relevance and up to three article links with their `news_id`.
+Labels are not yet written back to the `topics` table; that waits for
+team approval.

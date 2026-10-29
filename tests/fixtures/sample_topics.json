@@ -1,0 +1,156 @@
+{
+  "_comment": "Example ranked topics for #27. Fictional articles (example.com). Same fields as the planned read interface in #26: topic id, score, article_count, source_count and up to 3 articles per topic in rank order.",
+  "topics": [
+    {
+      "id": 101,
+      "score": 0.91,
+      "article_count": 7,
+      "source_count": 4,
+      "articles": [
+        {
+          "news_id": 1001,
+          "title": "EU publishes guidance for small businesses under the AI Act",
+          "source": "Example Tech News",
+          "link": "https://example.com/tech/eu-ai-act-guidance-small-business",
+          "description": "The European Commission has released practical guidance on which AI Act obligations apply to small and medium-sized companies."
+        },
+        {
+          "news_id": 1002,
+          "title": "Nya regler för AI: det här gäller för småföretag",
+          "source": "Exempel Affärer",
+          "link": "https://example.com/affarer/ai-forordningen-smaforetag",
+          "description": "AI-förordningen börjar gälla stegvis. Vi går igenom vad små företag behöver göra redan nu."
+        },
+        {
+          "news_id": 1003,
+          "title": "AI Act: transparency rules for chatbots explained",
+          "source": "Example Policy Weekly",
+          "link": "https://example.com/policy/ai-act-chatbot-transparency",
+          "description": "Companies using chatbots must tell users that they are talking to an AI system."
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "score": 0.84,
+      "article_count": 5,
+      "source_count": 3,
+      "articles": [
+        {
+          "news_id": 1011,
+          "title": "Accounting firms test AI agents for invoice matching",
+          "source": "Example Finance Today",
+          "link": "https://example.com/finance/ai-agents-invoice-matching",
+          "description": "Several mid-sized accounting firms report fewer manual hours after testing AI agents that match invoices with payments."
+        },
+        {
+          "news_id": 1012,
+          "title": "Redovisningsbyråer automatiserar bokslutet",
+          "source": "Exempel Ekonomi",
+          "link": "https://example.com/ekonomi/redovisningsbyraer-automatiserar-bokslut",
+          "description": ""
+        },
+        {
+          "news_id": 1013,
+          "title": "Survey: half of accountants now use generative AI weekly",
+          "source": "Example Finance Today",
+          "link": "https://example.com/finance/survey-accountants-generative-ai",
+          "description": "A new survey shows that generative AI has become a weekly tool for many accountants, mostly for drafting emails and reports."
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "score": 0.77,
+      "article_count": 4,
+      "source_count": 2,
+      "articles": [
+        {
+          "news_id": 1021,
+          "title": "Ideella föreningar får AI-stöd för bidragsansökningar",
+          "source": "Exempel Civilsamhälle",
+          "link": "https://example.com/civil/ai-stod-bidragsansokningar",
+          "description": "Ett nytt pilotprojekt hjälper föreningar att skriva bidragsansökningar med hjälp av AI."
+        },
+        {
+          "news_id": 1022,
+          "title": "Non-profits weigh data protection risks of AI tools",
+          "source": "Example Charity News",
+          "link": "https://example.com/charity/nonprofits-ai-data-protection",
+          "description": "Charities want to use AI tools but worry about storing member data with external providers."
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "score": 0.69,
+      "article_count": 3,
+      "source_count": 1,
+      "articles": [
+        {
+          "news_id": 1031,
+          "title": "Open-source model runs on a laptop with near cloud quality",
+          "source": "Example Tech News",
+          "link": "https://example.com/tech/open-source-model-laptop",
+          "description": "A new open-source language model can run locally on an ordinary laptop."
+        },
+        {
+          "news_id": 1032,
+          "title": "Why local AI models matter for privacy",
+          "source": "Example Tech News",
+          "link": "https://example.com/tech/local-ai-models-privacy",
+          "description": "Running AI models locally keeps sensitive data inside the company."
+        },
+        {
+          "news_id": 1033,
+          "title": "Benchmark: local models close the gap",
+          "source": "Example Tech News",
+          "link": "https://example.com/tech/benchmark-local-models",
+          "description": "Independent tests show smaller local models catching up on common office tasks."
+        }
+      ]
+    },
+    {
+      "id": 105,
+      "score": 0.62,
+      "articles": [
+        {
+          "news_id": 1041,
+          "title": "Skatteverket testar AI i kundtjänsten",
+          "source": "Exempel Ekonomi",
+          "link": "https://example.com/ekonomi/skatteverket-ai-kundtjanst",
+          "description": "Myndigheten testar en AI-assistent som svarar på enkla frågor om deklarationen."
+        },
+        {
+          "news_id": 1042,
+          "title": "Swedish tax agency pilots AI assistant",
+          "source": "Example Nordic Report",
+          "link": "https://example.com/nordic/swedish-tax-agency-ai-assistant",
+          "description": "The pilot covers simple questions about income tax returns."
+        }
+      ]
+    },
+    {
+      "id": 106,
+      "score": 0.55,
+      "article_count": 2,
+      "source_count": 2,
+      "articles": [
+        {
+          "news_id": 1051,
+          "title": "Workflow automation tools add AI steps for small teams",
+          "source": "Example Productivity",
+          "link": "https://example.com/productivity/workflow-automation-ai-steps",
+          "description": "Popular no-code automation tools now let small teams add AI steps such as summarising emails."
+        },
+        {
+          "news_id": 1052,
+          "title": "Automatisera utan att koda: guide för småföretag",
+          "source": "Exempel Affärer",
+          "link": "https://example.com/affarer/automatisera-utan-kod",
+          "description": "Så kommer du igång med automatisering av vanliga uppgifter utan programmering."
+        }
+      ]
+    }
+  ]
+}

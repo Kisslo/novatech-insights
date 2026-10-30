@@ -1,0 +1,102 @@
+{
+  "groups": {
+    "6": [
+      {
+        "source": "The Hacker News",
+        "title": "Hackers Use Autonomous AI Agents to Breach Company Websites, Target Over 1,200 Sites",
+        "description": "A Chinese-speaking criminal pointed autonomous AI agents at company websites and let them break in with almost no help, and a security researcher watched it happen because the operators left their control panels open on the internet. The agents tried more than 1,200 sites and reached websites belonging to more than 100 companies, including farm-equipment maker Deere, appliance company L├ñnk: https://thehackernews.com/2026/10/hackers-use-autonomous-ai-agents-to.html",
+        "published": "2026-10-20T12:00:00Z"
+      },
+      {
+        "source": "Help Net Security",
+        "title": "Hackers hijack exposed AI models to launch cyberattacks at victimsÔÇÖ expense",
+        "description": "An attack tool built around AI goes looking for AI models that anyone on the internet can reach, then uses them to plan break-ins while the modelÔÇÖs owner pays for the computing power. Symantec captured the agentÔÇÖs instruction set this summer through a honeypot posing as an unprotected AI service, researchers Priti More and Susmit Yenkar wrote. Its operators sent their entire working prompt to the decoy, expecting a live model on the other end ÔÇª More ÔåÆ The post Hackers hijack exposed AI models to launch cyberattacks at victimsÔÇÖ expense appeared first on Help Net Security. L├ñnk: https://www.helpnetsecurity.com/2026/10/23/llmjacking-agent-hijacks-exposed-ai-models/",
+        "published": "2026-10-20T12:00:00Z"
+      }
+    ],
+    "9": [
+      {
+        "source": "SiliconANGLE",
+        "title": "AI safety and financing worries multiply but everyoneÔÇÖs still racing full speed ahead",
+        "description": "The drumbeat over how safe artificial intelligence is ÔÇö or more to the point, isnÔÇÖt ÔÇö just keeps louder. In the wake of weeks of incidents involving rogue agents, with likely more to come, more government officials are calling for regulation, even if President Trump says itÔÇÖs not needed. Several states are suing OpenAI over [ÔÇª] The post AI safety and financing worries multiply but everyoneÔÇÖs still racing full speed ahead appeared first on SiliconANGLE . L├ñnk: https://siliconangle.com/2026/10/16/ai-safety-financing-worries-multiply-but-everyones-still-racing-full-speed-ahead/",
+        "published": "2026-10-20T12:00:00Z"
+      },
+      {
+        "source": "Tech Xplore",
+        "title": "Q&A: Is it already too late to reduce catastrophic AI risk?",
+        "description": "Is it too late to safeguard ourselves from a large-scale catastrophic event caused by AI running amok? L├ñnk: https://techxplore.com/news/2026-10-qa-late-catastrophic-ai.html",
+        "published": "2026-10-20T12:00:00Z"
+      }
+    ],
+    "12": [
+      {
+        "source": "Unite.AI",
+        "title": "IRONSCALES Report Finds AI Agents Are Becoming a New Target for Phishing",
+        "description": "A phishing message no longer needs to persuade the employee who owns an inbox. It can target the software reading that inbox on their behalf. That is the central warning of IRONSCALES' new From Deepfakes to Double Agents: The New Face of AI-Driven Cyber Risk report, which finds that enterprise adoption of tools capable of taking action has moved faster than the security controls surrounding them. In the company-commissioned Censuswide survey, 77% of respondents said an AI agent or tool at theirÔÇª L├ñnk: https://www.unite.ai/ironscales-2026-threat-report-ai-agents-phishing/",
+        "published": "2026-10-20T12:00:00Z"
+      },
+      {
+        "source": "The Register",
+        "title": "When the attacker becomes the user: Rethinking account takeover",
+        "description": "SPONSORED FEATURE: AI makes phishing easier than ever L├ñnk: https://www.theregister.com/security/2026/10/22/sponsored-when-the-attacker-becomes-the-user-rethinking-account-takeover/5303913",
+        "published": "2026-10-20T12:00:00Z"
+      }
+    ],
+    "14": [
+      {
+        "source": "Help Net Security",
+        "title": "AI agent observability is struggling to keep up with hallucinations",
+        "description": "Sixty-two percent of IT and engineering professionals now rely on AI agents frequently to work out why their systems broke, and more than half have no way to measure whether the agents get it right. Splunk surveyed 2,050 of them across ten countries. Source: Splunk Agents diagnose, people still ship the code Teams have been careful about where they let agents work. Finding root causes, tuning alerts, and drafting runbooks, the step-by-step guides engineers follow ÔÇª More ÔåÆ The post AI agent observability is struggling to keep up with hallucinations appeared first on Help Net Security . L├ñnk: https://www.helpnetsecurity.com/2026/10/22/ai-agent-observability-report/",
+        "published": "2026-10-20T12:00:00Z"
+      },
+      {
+        "source": "n8n Blog",
+        "title": "Hallucination Detection Methods for AI Agent Workflows",
+        "description": "AI agent hallucinations are hard to catch because they usually look like normal answers. An agent can invent a fact, misread retrieved context, or contradict itself without signaling that anything went wrong. Once that output triggers another workflow step, the mistake can quickly become a production problem. Effective hallucination detection L├ñnk: https://blog.n8n.io/hallucination-detection-methods-for-ai-agent-workflows/",
+        "published": "2026-10-20T12:00:00Z"
+      }
+    ],
+    "16": [
+      {
+        "source": "Unite.AI",
+        "title": "Wabi Opens Its Personal AI Assistant on iOS, Android, and Mac",
+        "description": "Wabi, the consumer AI startup founded by Replika creator Eugenia Kuyda, opened its personal AI assistant to public download on October 19, 2026, making the app available for iOS, Android, and Mac after an invite-only rollout that began on September 28, 2026. The company announced the release in a launch thread on its official X account, presenting Wabi as an AI assistant designed to be used together with the people in a user's life. The company described the assistant as highly proactiveÔÇª L├ñnk: https://www.unite.ai/wabi-opens-its-personal-ai-assistant-on-ios-android-and-mac/",
+        "published": "2026-10-20T12:00:00Z"
+      },
+      {
+        "source": "TechCrunch",
+        "title": "ReplikaÔÇÖs founder built the AI assistant she pitched at Disrupt 12 years ago",
+        "description": "Eugenia Kuyda's newest startup Wabi is positioned to take advantage of an idea she had more than a decade ago. Wabi offers a personal AI assistant with a twist, free and downloadable to anyone today. L├ñnk: https://techcrunch.com/2026/10/19/replikas-founder-built-the-ai-assistant-she-pitched-at-disrupt-12-years-ago/",
+        "published": "2026-10-20T12:00:00Z"
+      }
+    ],
+    "17": [
+      {
+        "source": "WIRED",
+        "title": "AI Hacks Leave a Mess That AI Companies ArenÔÇÖt Paying For",
+        "description": "Powerful AI models continue to cause chaos, but their targets arenÔÇÖt widely seeking justice. Instead, theyÔÇÖre being encouraged to adopt those same tools. L├ñnk: https://www.wired.com/story/ai-hacks-leave-a-mess-that-ai-companies-arent-cleaning-up/",
+        "published": "2026-10-20T12:00:00Z"
+      },
+      {
+        "source": "Dark Reading",
+        "title": "AI Slop Isn't Just for Social Media; It's Ruining Cyberattacks, Too",
+        "description": "Don't buy the hype! AI has been dumbing down cyberattacks, and serious threat actors are barely touching it. L├ñnk: https://www.darkreading.com/threat-intelligence/ai-slop-ruining-cyberattacks",
+        "published": "2026-10-20T12:00:00Z"
+      }
+    ],
+    "18": [
+      {
+        "source": "The Hacker News",
+        "title": "The AI Agent Nobody Owns: Watch Expert Webinar On Your Newest Insider Threat",
+        "description": "Right now, there is probably an AI agent running on a laptop somewhere in your network. It stores API keys and database passwords, can access your internal systems, and works without anyone watching. Nobody reviewed its access. Nobody owns it. If an employee had that much reach with that little oversight, you would call it an insider risk. So why do we still call the agent a productivity tool? L├ñnk: https://thehackernews.com/2026/10/the-ai-agent-nobody-owns-watch-expert.html",
+        "published": "2026-10-20T12:00:00Z"
+      },
+      {
+        "source": "The New Stack",
+        "title": "AI agent security is a lifecycle ÔÇö not a gatekeeper",
+        "description": "Enterprise security has traditionally operated on a relatively straightforward premise: establish identity, authenticate the requester, determine what that identity can The post AI agent security is a lifecycle ÔÇö not a gatekeeper appeared first on The New Stack. L├ñnk: https://thenewstack.io/ai-agent-security-lifecycle/",
+        "published": "2026-10-20T12:00:00Z"
+      }
+    ]
+  }
+}

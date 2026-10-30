@@ -1,4 +1,6 @@
-from rank_topics import count_distinct_sources
+import pytest
+
+from rank_topics import calculate_time_decay, count_distinct_sources
 
 
 def test_count_distinct_sources_counts_each_source_once():
@@ -36,3 +38,38 @@ def test_count_distinct_sources_ignores_missing_sources():
     ]
 
     assert count_distinct_sources(articles) == 1
+
+
+def test_time_decay_halves_weight_after_three_days():
+    result = calculate_time_decay(age_days=3, half_life_days=3)
+
+    assert result == 0.5
+
+
+def test_time_decay_before_half_life():
+    result = calculate_time_decay(age_days=1.5, half_life_days=3)
+
+    assert result == pytest.approx(0.70710678)
+
+
+def test_time_decay_returns_full_weight_for_new_article():
+    result = calculate_time_decay(age_days=0, half_life_days=3)
+
+    assert result == 1.0
+
+
+def test_time_decay_uses_configured_half_life():
+    result = calculate_time_decay(age_days=7, half_life_days=7)
+
+    assert result == 0.5
+
+
+@pytest.mark.parametrize("half_life_days", [0, -3])
+def test_time_decay_rejects_non_positive_half_life(half_life_days):
+    with pytest.raises(ValueError):
+        calculate_time_decay(age_days=1, half_life_days=half_life_days)
+
+
+def test_time_decay_rejects_negative_age():
+    with pytest.raises(ValueError):
+        calculate_time_decay(age_days=-1, half_life_days=3)

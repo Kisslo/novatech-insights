@@ -1,4 +1,4 @@
-﻿import re
+import re
 from pathlib import Path
 
 path = Path("experiments/data/audit_result.txt")

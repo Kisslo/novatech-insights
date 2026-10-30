@@ -1,4 +1,4 @@
-﻿import json
+import json
 from pathlib import Path
 
 articles_path = Path("experiments/data/manual_review_articles.json")

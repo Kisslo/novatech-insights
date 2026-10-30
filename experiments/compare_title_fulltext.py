@@ -1,4 +1,3 @@
-﻿
 import json
 import sys
 from pathlib import Path
@@ -22,10 +21,7 @@ def main():
     with LABELS_PATH.open("r", encoding="utf-8-sig") as file:
         labels = json.load(file)
 
-    labels_by_group = {
-        str(pair["group"]): pair["label"]
-        for pair in labels["pairs"]
-    }
+    labels_by_group = {str(pair["group"]): pair["label"] for pair in labels["pairs"]}
 
     articles = []
     pair_indices = {}
@@ -71,7 +67,7 @@ def main():
         false_negative = 0
         correct = 0
 
-        print(f"\nRubrikvikt: {title_weight:.0%} | Heltextvikt: {1-title_weight:.0%}")
+        print(f"\nRubrikvikt: {title_weight:.0%} | Heltextvikt: {1 - title_weight:.0%}")
         print("-" * 75)
 
         for group_id, title_sim, full_sim, label in results:

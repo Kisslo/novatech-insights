@@ -1,4 +1,3 @@
-
 from collections import Counter
 from itertools import combinations
 
@@ -31,22 +30,19 @@ def audit_group(group, embeddings, article_index):
         minimum_similarity = 1.0
         average_similarity = 1.0
 
-    sources = [
-        (article.get("source") or "").strip()
-        for article in articles
-    ]
-    source_counts = Counter(
-        source.casefold() for source in sources if source
-    )
+    sources = [(article.get("source") or "").strip() for article in articles]
+    source_counts = Counter(source.casefold() for source in sources if source)
 
     # Beräkna likheten mellan varje artikelpar.
     pairs = []
     for i, j in combinations(range(len(articles)), 2):
-        pairs.append({
-            "article_a": articles[i],
-            "article_b": articles[j],
-            "similarity": float(similarity_matrix[i, j]),
-        })
+        pairs.append(
+            {
+                "article_a": articles[i],
+                "article_b": articles[j],
+                "similarity": float(similarity_matrix[i, j]),
+            }
+        )
 
     pairs.sort(key=lambda pair: pair["similarity"])
 
@@ -55,8 +51,7 @@ def audit_group(group, embeddings, article_index):
         "minimum_similarity": minimum_similarity,
         "average_similarity": average_similarity,
         "duplicate_sources": [
-            source for source, count in source_counts.items()
-            if count > 1
+            source for source, count in source_counts.items() if count > 1
         ],
         "pairs": pairs,
     }
@@ -89,10 +84,7 @@ def print_group_audit(number, item):
     print(f"Lägsta parlikhet: {item['minimum_similarity']:.3f}")
 
     if item["duplicate_sources"]:
-        print(
-            "VARNING – upprepade källor: "
-            + ", ".join(item["duplicate_sources"])
-        )
+        print("VARNING – upprepade källor: " + ", ".join(item["duplicate_sources"]))
 
     print("\n  Artiklar:")
     for article in group["articles"]:
@@ -135,15 +127,9 @@ def main():
     print("\nBygger nyhetsgrupper...")
     groups = grouping.build_groups(articles, embeddings)
 
-    article_index = {
-        id(article): index
-        for index, article in enumerate(articles)
-    }
+    article_index = {id(article): index for index, article in enumerate(articles)}
 
-    audits = [
-        audit_group(group, embeddings, article_index)
-        for group in groups
-    ]
+    audits = [audit_group(group, embeddings, article_index) for group in groups]
 
     audits.sort(
         key=lambda item: (
@@ -159,46 +145,32 @@ def main():
     print(f"Grupper med minst två källor: {len(groups)}")
 
     low_cohesion = [
-        item for item in audits
-        if item["minimum_similarity"] < LOW_COHESION_THRESHOLD
+        item for item in audits if item["minimum_similarity"] < LOW_COHESION_THRESHOLD
     ]
     large_groups = [
-        item for item in audits
-        if item["group"]["article_count"] >= LARGE_GROUP_SIZE
+        item for item in audits if item["group"]["article_count"] >= LARGE_GROUP_SIZE
     ]
-    repeated_sources = [
-        item for item in audits
-        if item["duplicate_sources"]
-    ]
+    repeated_sources = [item for item in audits if item["duplicate_sources"]]
 
     print(
         f"Grupper med minsta parlikhet under "
         f"{LOW_COHESION_THRESHOLD:.2f}: {len(low_cohesion)}"
     )
-    print(
-        f"Grupper med minst {LARGE_GROUP_SIZE} artiklar: "
-        f"{len(large_groups)}"
-    )
+    print(f"Grupper med minst {LARGE_GROUP_SIZE} artiklar: {len(large_groups)}")
     print(f"Grupper med upprepade källor: {len(repeated_sources)}")
 
     print("\nLÄGSTA SAMMANHÅLLNING – GRANSKA DESSA FÖRST")
     print("-" * 80)
 
-    for number, item in enumerate(
-        audits[:MAX_GROUPS_TO_PRINT], start=1
-    ):
+    for number, item in enumerate(audits[:MAX_GROUPS_TO_PRINT], start=1):
         print_group_audit(number, item)
 
     # Skriv ut grupper med upprepade källor separat om de inte
     # redan finns bland de 30 grupper som visats.
-    printed_group_ids = {
-        id(item["group"])
-        for item in audits[:MAX_GROUPS_TO_PRINT]
-    }
+    printed_group_ids = {id(item["group"]) for item in audits[:MAX_GROUPS_TO_PRINT]}
 
     remaining_repeated = [
-        item for item in repeated_sources
-        if id(item["group"]) not in printed_group_ids
+        item for item in repeated_sources if id(item["group"]) not in printed_group_ids
     ]
 
     if remaining_repeated:

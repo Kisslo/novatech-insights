@@ -1,4 +1,4 @@
-﻿import json
+import json
 import sys
 from pathlib import Path
 
@@ -24,19 +24,14 @@ def main():
     with LABELS_PATH.open("r", encoding="utf-8-sig") as file:
         labels = json.load(file)
 
-    labels_by_group = {
-        str(pair["group"]): pair["label"]
-        for pair in labels["pairs"]
-    }
+    labels_by_group = {str(pair["group"]): pair["label"] for pair in labels["pairs"]}
 
     model = SentenceTransformer(MODEL_NAME)
     results = []
 
     for group_id, articles in cases["groups"].items():
         if len(articles) != 2:
-            raise ValueError(
-                f"Grupp {group_id} måste innehålla exakt två artiklar."
-            )
+            raise ValueError(f"Grupp {group_id} måste innehålla exakt två artiklar.")
 
         title_embeddings = model.encode(
             [article["title"] for article in articles],
@@ -50,63 +45,56 @@ def main():
             convert_to_numpy=True,
         )
 
-        title_sim = float(
-            np.dot(title_embeddings[0], title_embeddings[1])
-        )
-        full_sim = float(
-            np.dot(full_embeddings[0], full_embeddings[1])
-        )
+        title_sim = float(np.dot(title_embeddings[0], title_embeddings[1]))
+        full_sim = float(np.dot(full_embeddings[0], full_embeddings[1]))
 
-        results.append({
-            "group": int(group_id),
-            "title": title_sim,
-            "full": full_sim,
-            "label": labels_by_group[str(group_id)],
-        })
+        results.append(
+            {
+                "group": int(group_id),
+                "title": title_sim,
+                "full": full_sim,
+                "label": labels_by_group[str(group_id)],
+            }
+        )
 
     print("\nKOMBINATIONSTEST – RUBRIK + HELTEXT")
     print(f"Jämförelsetröskel: {THRESHOLD:.2f}")
     print("Vikter anger rubrikens andel av den kombinerade poängen.\n")
 
     for weight in TITLE_WEIGHTS:
-        print(f"\nRubrikvikt: {weight:.0%} | Heltextvikt: {1-weight:.0%}")
+        print(f"\nRubrikvikt: {weight:.0%} | Heltextvikt: {1 - weight:.0%}")
         print("Grupp  Poäng  Över 0.75  Etikett")
         print("-" * 52)
 
         for result in results:
-            score = (
-                weight * result["title"]
-                + (1 - weight) * result["full"]
-            )
+            score = weight * result["title"] + (1 - weight) * result["full"]
             above = "Ja" if score >= THRESHOLD else "Nej"
 
-            print(
-                f"{result['group']:>5}  {score:.3f}  "
-                f"{above:<10}  {result['label']}"
-            )
+            print(f"{result['group']:>5}  {score:.3f}  {above:<10}  {result['label']}")
 
         # Par över tröskeln behandlas som positiva matchningskandidater.
         tp = sum(
-            1 for r in results
-            if (
-                weight * r["title"] + (1 - weight) * r["full"]
-            ) >= THRESHOLD and r["label"] == "same_event"
+            1
+            for r in results
+            if (weight * r["title"] + (1 - weight) * r["full"]) >= THRESHOLD
+            and r["label"] == "same_event"
         )
         fp = sum(
-            1 for r in results
-            if (
-                weight * r["title"] + (1 - weight) * r["full"]
-            ) >= THRESHOLD and r["label"] == "different_events"
+            1
+            for r in results
+            if (weight * r["title"] + (1 - weight) * r["full"]) >= THRESHOLD
+            and r["label"] == "different_events"
         )
         fn = sum(
-            1 for r in results
-            if (
-                weight * r["title"] + (1 - weight) * r["full"]
-            ) < THRESHOLD and r["label"] == "same_event"
+            1
+            for r in results
+            if (weight * r["title"] + (1 - weight) * r["full"]) < THRESHOLD
+            and r["label"] == "same_event"
         )
 
-        print(f"Rätt positiva: {tp} | Felaktigt positiva: {fp} | "
-              f"Missade positiva: {fn}")
+        print(
+            f"Rätt positiva: {tp} | Felaktigt positiva: {fp} | Missade positiva: {fn}"
+        )
 
     print(
         "\nOBS: Detta är ett litet diagnostiskt test. "

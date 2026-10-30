@@ -1,4 +1,4 @@
-﻿import json
+import json
 import re
 from pathlib import Path
 
@@ -10,20 +10,73 @@ labels = json.loads(
 )
 
 stopwords = {
-    "the", "and", "for", "are", "with", "from", "that", "this",
-    "into", "its", "how", "why", "you", "your", "not", "but",
-    "has", "have", "was", "were", "can", "new", "their", "they",
-    "about", "when", "who", "what", "just", "than", "still",
-    "over", "too", "becoming", "built", "be", "to", "of", "in",
-    "on", "a", "an", "is", "it", "at", "as", "by", "or",
-    "these", "those", "which", "while", "after", "also", "being",
-    "https", "http", "www", "com"
+    "the",
+    "and",
+    "for",
+    "are",
+    "with",
+    "from",
+    "that",
+    "this",
+    "into",
+    "its",
+    "how",
+    "why",
+    "you",
+    "your",
+    "not",
+    "but",
+    "has",
+    "have",
+    "was",
+    "were",
+    "can",
+    "new",
+    "their",
+    "they",
+    "about",
+    "when",
+    "who",
+    "what",
+    "just",
+    "than",
+    "still",
+    "over",
+    "too",
+    "becoming",
+    "built",
+    "be",
+    "to",
+    "of",
+    "in",
+    "on",
+    "a",
+    "an",
+    "is",
+    "it",
+    "at",
+    "as",
+    "by",
+    "or",
+    "these",
+    "those",
+    "which",
+    "while",
+    "after",
+    "also",
+    "being",
+    "https",
+    "http",
+    "www",
+    "com",
 }
+
 
 def keywords(article):
     text = article["title"] + " " + article["description"]
     words = re.findall(r"[a-zA-Z0-9]+", text.casefold())
     return {w for w in words if len(w) > 3 and w not in stopwords}
+
 
 labels_by_group = {str(p["group"]): p for p in labels["pairs"]}
 

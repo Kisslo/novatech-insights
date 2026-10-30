@@ -1,4 +1,4 @@
-﻿import re
+import re
 from pathlib import Path
 
 text = Path("experiments/data/audit_result.txt").read_text(
@@ -8,7 +8,8 @@ text = Path("experiments/data/audit_result.txt").read_text(
 lines = text.splitlines()
 
 starts = [
-    i for i, line in enumerate(lines)
+    i
+    for i, line in enumerate(lines)
     if re.match(r"^\s*Grupp\s+\d+:", line, re.IGNORECASE)
 ]
 

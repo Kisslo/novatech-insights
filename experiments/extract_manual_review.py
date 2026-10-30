@@ -1,4 +1,4 @@
-﻿import json
+import json
 import re
 from pathlib import Path
 
@@ -66,9 +66,7 @@ for line in lines:
         article[field] += " " + line.strip()
 
 errors = {
-    group: len(articles)
-    for group, articles in groups.items()
-    if len(articles) != 2
+    group: len(articles) for group, articles in groups.items() if len(articles) != 2
 }
 missing = wanted - {int(group) for group in groups}
 

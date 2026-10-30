@@ -1,4 +1,4 @@
-﻿import json
+import json
 import re
 from pathlib import Path
 
@@ -9,18 +9,15 @@ text = Path("experiments/data/audit_result.txt").read_text(
 lines = text.splitlines()
 
 group_starts = [
-    i for i, line in enumerate(lines)
+    i
+    for i, line in enumerate(lines)
     if re.match(r"^\s*Grupp\s+\d+:", line, re.IGNORECASE)
 ]
 
 groups = []
 
 for position, start in enumerate(group_starts):
-    end = (
-        group_starts[position + 1]
-        if position + 1 < len(group_starts)
-        else len(lines)
-    )
+    end = group_starts[position + 1] if position + 1 < len(group_starts) else len(lines)
     block = lines[start:end]
 
     header_match = re.search(
@@ -79,12 +76,14 @@ for position, start in enumerate(group_starts):
     if current:
         articles.append(current)
 
-    groups.append({
-        "group_id": group_id,
-        "reported_article_count": expected_count,
-        "extracted_article_count": len(articles),
-        "articles": articles,
-    })
+    groups.append(
+        {
+            "group_id": group_id,
+            "reported_article_count": expected_count,
+            "extracted_article_count": len(articles),
+            "articles": articles,
+        }
+    )
 
 output = Path("experiments/data/audit_groups_for_review.json")
 output.write_text(
@@ -103,14 +102,13 @@ output.write_text(
 )
 
 mismatches = [
-    group for group in groups
+    group
+    for group in groups
     if group["reported_article_count"] != group["extracted_article_count"]
 ]
 
 print("Grupper extraherade:", len(groups))
-print("Artikelposter extraherade:", sum(
-    len(group["articles"]) for group in groups
-))
+print("Artikelposter extraherade:", sum(len(group["articles"]) for group in groups))
 print("Grupper med avvikande antal:", len(mismatches))
 
 for group in mismatches:

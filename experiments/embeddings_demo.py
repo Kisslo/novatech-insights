@@ -1,4 +1,3 @@
-
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -33,10 +32,7 @@ articles = [
     },
 ]
 
-texts = [
-    f"{article['title']}. {article['description']}"
-    for article in articles
-]
+texts = [f"{article['title']}. {article['description']}" for article in articles]
 
 embeddings = model.encode(texts, normalize_embeddings=True)
 similarities = cosine_similarity(embeddings)

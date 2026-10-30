@@ -12,10 +12,7 @@ import src.group_news as grouping
 
 CASES_PATH = Path("experiments/data/grouping_cases.json")
 
-MODEL_NAME = (
-    "sentence-transformers/"
-    "paraphrase-multilingual-MiniLM-L12-v2"
-)
+MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 THRESHOLDS_TO_TEST = [0.70, 0.75, 0.80, 0.85, 0.90]
 BASELINE_THRESHOLD = 0.80
@@ -24,6 +21,7 @@ BASELINE_THRESHOLD = 0.80
 # --------------------------------------------------
 # LÄS TESTFALL OCH HÄMTA ARTIKLAR
 # --------------------------------------------------
+
 
 def load_cases():
     with CASES_PATH.open("r", encoding="utf-8") as file:
@@ -74,9 +72,7 @@ def prepare_test_data():
                 continue
 
             if len(matches) > 1:
-                ambiguous_titles.append(
-                    (event_id, title, len(matches))
-                )
+                ambiguous_titles.append((event_id, title, len(matches)))
 
             for article in matches:
                 article_id = article.get("id")
@@ -105,17 +101,14 @@ def prepare_test_data():
     print(f"Matchade testartiklar: {len(selected_articles)}")
 
     if ambiguous_titles:
-        print(
-            "\nVARNING: Följande titlar matchade flera artiklar:"
-        )
+        print("\nVARNING: Följande titlar matchade flera artiklar:")
 
         for event_id, title, count in ambiguous_titles:
             print(f"  [{event_id}] {title} ({count} träffar)")
 
     if missing_titles:
         print(
-            f"\nVARNING: {len(missing_titles)} testtitlar "
-            "hittades inte i public.news:"
+            f"\nVARNING: {len(missing_titles)} testtitlar hittades inte i public.news:"
         )
 
         for event_id, title in missing_titles:
@@ -133,6 +126,7 @@ def prepare_test_data():
 # --------------------------------------------------
 # BERÄKNA LIKHETSMATRIS
 # --------------------------------------------------
+
 
 def calculate_similarity_matrix(embeddings):
     """
@@ -157,6 +151,7 @@ def calculate_similarity_matrix(embeddings):
 # --------------------------------------------------
 # DIAGNOSTIK FÖR TRÖSKELVÄRDEN
 # --------------------------------------------------
+
 
 def print_threshold_diagnostics(articles, embeddings):
     """
@@ -185,19 +180,13 @@ def print_threshold_diagnostics(articles, embeddings):
     for threshold in THRESHOLDS_TO_TEST:
         count = int(np.sum(scores >= threshold))
 
-        print(
-            f"Tröskel {threshold:.2f}: "
-            f"{count} kandidatpar"
-        )
+        print(f"Tröskel {threshold:.2f}: {count} kandidatpar")
 
     lowest_threshold = min(THRESHOLDS_TO_TEST)
     highest_threshold = max(THRESHOLDS_TO_TEST)
 
     # Par som passerar den lägsta tröskeln men inte den högsta.
-    between_mask = (
-        (scores >= lowest_threshold)
-        & (scores < highest_threshold)
-    )
+    between_mask = (scores >= lowest_threshold) & (scores < highest_threshold)
 
     between_indices = np.flatnonzero(between_mask)
 
@@ -244,6 +233,7 @@ def print_threshold_diagnostics(articles, embeddings):
 # UTVÄRDERA GRUPPER
 # --------------------------------------------------
 
+
 def evaluate_groups(articles, groups, event_by_id):
     """
     TP: samma händelse, grupperade tillsammans.
@@ -278,8 +268,7 @@ def evaluate_groups(articles, groups, event_by_id):
             same_predicted_group = (
                 id_a in predicted_group_by_id
                 and id_b in predicted_group_by_id
-                and predicted_group_by_id[id_a]
-                == predicted_group_by_id[id_b]
+                and predicted_group_by_id[id_a] == predicted_group_by_id[id_b]
             )
 
             if same_event and same_predicted_group:
@@ -294,11 +283,7 @@ def evaluate_groups(articles, groups, event_by_id):
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
 
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if precision + recall
-        else 0.0
-    )
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
 
     return {
         "tp": tp,
@@ -329,12 +314,11 @@ def print_metrics(threshold, metrics):
 # DATUMANALYS
 # --------------------------------------------------
 
+
 def parse_article_date(article):
     try:
-        return grouping.parse_published(
-            article.get("published")
-        )
-    except (ValueError, TypeError, AttributeError):
+        return grouping.parse_published(article.get("published"))
+    except ValueError, TypeError, AttributeError:
         return None
 
 
@@ -346,16 +330,12 @@ def date_gap_days(article_a, article_b):
         return None
 
     try:
-        difference = abs(
-            (date_a - date_b).total_seconds()
-        )
+        difference = abs((date_a - date_b).total_seconds())
     except TypeError:
         date_a = date_a.replace(tzinfo=None)
         date_b = date_b.replace(tzinfo=None)
 
-        difference = abs(
-            (date_a - date_b).total_seconds()
-        )
+        difference = abs((date_a - date_b).total_seconds())
 
     return difference / 86400
 
@@ -363,6 +343,7 @@ def date_gap_days(article_a, article_b):
 # --------------------------------------------------
 # VISA MISSADE POSITIVA PAR
 # --------------------------------------------------
+
 
 def print_missed_pairs(
     articles,
@@ -407,14 +388,10 @@ def print_missed_pairs(
             reasons = []
 
             if similarity < threshold:
-                reasons.append(
-                    "likheten ligger under tröskeln"
-                )
+                reasons.append("likheten ligger under tröskeln")
 
             if gap is not None and gap > max_days:
-                reasons.append(
-                    f"datumskillnaden överstiger {max_days} dagar"
-                )
+                reasons.append(f"datumskillnaden överstiger {max_days} dagar")
 
             if not reasons:
                 reasons.append(
@@ -446,6 +423,7 @@ def print_missed_pairs(
 # VISA GRUPPER
 # --------------------------------------------------
 
+
 def print_groups(groups):
     print("\nGRUPPER SOM HITTADEs")
     print("=" * 80)
@@ -466,14 +444,14 @@ def print_groups(groups):
 
         for article in group_articles:
             print(
-                f"  - [{article.get('source', 'okänd källa')}] "
-                f"{article.get('title')}"
+                f"  - [{article.get('source', 'okänd källa')}] {article.get('title')}"
             )
 
 
 # --------------------------------------------------
 # HUVUDPROGRAM
 # --------------------------------------------------
+
 
 def main():
     articles, event_by_id = prepare_test_data()
@@ -489,10 +467,7 @@ def main():
     # Samma textrepresentation som i produktionsmodulen:
     # titel + beskrivning när beskrivning finns.
     embeddings = model.encode(
-        [
-            grouping.article_text(article)
-            for article in articles
-        ],
+        [grouping.article_text(article) for article in articles],
         normalize_embeddings=True,
         convert_to_numpy=True,
         show_progress_bar=True,
@@ -511,18 +486,13 @@ def main():
         print("JÄMFÖRELSE AV TRÖSKELVÄRDEN")
         print("=" * 80)
 
-        print(
-            "Tröskel   TP   FP   FN   TN   "
-            "Precision  Recall  F1"
-        )
+        print("Tröskel   TP   FP   FN   TN   Precision  Recall  F1")
         print("-" * 65)
 
         for threshold in THRESHOLDS_TO_TEST:
             grouping.SIMILARITY_THRESHOLD = threshold
 
-            print(
-                f"\nKör gruppering med tröskel {threshold:.2f}..."
-            )
+            print(f"\nKör gruppering med tröskel {threshold:.2f}...")
 
             groups = grouping.build_groups(
                 articles,
@@ -541,10 +511,7 @@ def main():
             print_metrics(threshold, metrics)
 
         if BASELINE_THRESHOLD not in results:
-            raise ValueError(
-                "Baslinjetröskeln måste finnas i "
-                "THRESHOLDS_TO_TEST."
-            )
+            raise ValueError("Baslinjetröskeln måste finnas i THRESHOLDS_TO_TEST.")
 
         baseline_groups = groups_by_threshold[BASELINE_THRESHOLD]
         baseline_metrics = results[BASELINE_THRESHOLD]
@@ -564,10 +531,7 @@ def main():
         print("SAMMANFATTNING")
         print("=" * 80)
 
-        best_f1 = max(
-            metrics["f1"]
-            for metrics in results.values()
-        )
+        best_f1 = max(metrics["f1"] for metrics in results.values())
 
         best_thresholds = [
             threshold
@@ -579,10 +543,7 @@ def main():
 
         print(
             "Trösklar med högsta F1: "
-            + ", ".join(
-                f"{threshold:.2f}"
-                for threshold in best_thresholds
-            )
+            + ", ".join(f"{threshold:.2f}" for threshold in best_thresholds)
         )
 
         for threshold in best_thresholds:

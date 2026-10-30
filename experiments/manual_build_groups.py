@@ -1,4 +1,3 @@
-﻿
 import json
 import re
 import sys
@@ -17,28 +16,86 @@ LABELS_PATH = ROOT / "experiments" / "data" / "manual_review_pairs.json"
 
 # Generella ämnesord räknas inte som specifika signaler.
 GENERIC_WORDS = {
-    "about", "after", "again", "also", "among", "because", "before",
-    "being", "both", "could", "cyber", "first", "from", "have", "into",
-    "more", "most", "other", "over", "same", "security", "their",
-    "there", "these", "they", "this", "those", "through", "under",
-    "using", "with", "without", "would", "your", "news", "report",
-    "article", "sponsored", "feature", "watch", "expert", "today",
-    "years", "year", "company", "companies", "people", "world",
-    "artificial", "intelligence", "system", "systems", "model", "models",
-    "agent", "agents", "assistant", "assistants", "ai", "hacker", "hackers",
-    "attack", "attacks", "attacker", "attackers",
+    "about",
+    "after",
+    "again",
+    "also",
+    "among",
+    "because",
+    "before",
+    "being",
+    "both",
+    "could",
+    "cyber",
+    "first",
+    "from",
+    "have",
+    "into",
+    "more",
+    "most",
+    "other",
+    "over",
+    "same",
+    "security",
+    "their",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "through",
+    "under",
+    "using",
+    "with",
+    "without",
+    "would",
+    "your",
+    "news",
+    "report",
+    "article",
+    "sponsored",
+    "feature",
+    "watch",
+    "expert",
+    "today",
+    "years",
+    "year",
+    "company",
+    "companies",
+    "people",
+    "world",
+    "artificial",
+    "intelligence",
+    "system",
+    "systems",
+    "model",
+    "models",
+    "agent",
+    "agents",
+    "assistant",
+    "assistants",
+    "ai",
+    "hacker",
+    "hackers",
+    "attack",
+    "attacks",
+    "attacker",
+    "attackers",
 }
 
 
 def specific_words(article):
-    text = " ".join([
-        article.get("title") or "",
-        article.get("description") or "",
-    ]).casefold()
+    text = " ".join(
+        [
+            article.get("title") or "",
+            article.get("description") or "",
+        ]
+    ).casefold()
 
     words = set(re.findall(r"[a-z][a-z0-9'-]{2,}", text))
     return {
-        word for word in words
+        word
+        for word in words
         if word not in GENERIC_WORDS
         and not word.startswith("http")
         and not word.startswith("www")
@@ -52,10 +109,7 @@ def main():
     with LABELS_PATH.open("r", encoding="utf-8-sig") as file:
         labels = json.load(file)
 
-    labels_by_group = {
-        str(item["group"]): item["label"]
-        for item in labels["pairs"]
-    }
+    labels_by_group = {str(item["group"]): item["label"] for item in labels["pairs"]}
 
     articles = []
     pair_indices = {}
@@ -98,12 +152,8 @@ def main():
 
     # Metod B: kombinerad likhet plus försiktig kontroll av specifika ord.
     # Detta är enbart ett lokalt experiment; produktionskoden ändras inte.
-    combined_embeddings = (
-        0.70 * full_embeddings + 0.30 * title_embeddings
-    )
-    combined_embeddings /= np.linalg.norm(
-        combined_embeddings, axis=1, keepdims=True
-    )
+    combined_embeddings = 0.70 * full_embeddings + 0.30 * title_embeddings
+    combined_embeddings /= np.linalg.norm(combined_embeddings, axis=1, keepdims=True)
 
     specific_sets = [specific_words(article) for article in articles]
     alternative_embeddings = combined_embeddings.copy()
@@ -132,9 +182,7 @@ def main():
 
     # Vi använder en separat lokal matris och samma grupperingsfunktion.
     # Justeringarna är en diagnostisk approximation, inte en färdig regel.
-    alternative_groups = grouping.build_groups(
-        articles, alternative_embeddings
-    )
+    alternative_groups = grouping.build_groups(articles, alternative_embeddings)
 
     def evaluate(groups, method):
         article_to_group = {}
@@ -147,11 +195,9 @@ def main():
         print("-" * 75)
 
         for group_id, (a, b) in pair_indices.items():
-            same = (
-                id(articles[a]) in article_to_group
-                and article_to_group.get(id(articles[a]))
-                == article_to_group.get(id(articles[b]))
-            )
+            same = id(articles[a]) in article_to_group and article_to_group.get(
+                id(articles[a])
+            ) == article_to_group.get(id(articles[b]))
             expected = labels_by_group[group_id] == "same_event"
 
             if same == expected:

@@ -1,4 +1,4 @@
-﻿import json
+import json
 import sys
 from pathlib import Path
 
@@ -22,19 +22,14 @@ def main():
         labels = json.load(file)
 
     articles_by_group = cases["groups"]
-    labels_by_group = {
-        str(pair["group"]): pair
-        for pair in labels["pairs"]
-    }
+    labels_by_group = {str(pair["group"]): pair for pair in labels["pairs"]}
 
     model = SentenceTransformer(MODEL_NAME)
     results = []
 
     for group_id, articles in articles_by_group.items():
         if len(articles) != 2:
-            raise ValueError(
-                f"Grupp {group_id} måste innehålla exakt två artiklar."
-            )
+            raise ValueError(f"Grupp {group_id} måste innehålla exakt två artiklar.")
 
         texts = [article_text(article) for article in articles]
         embeddings = model.encode(
@@ -54,10 +49,7 @@ def main():
 
     for group_id, similarity, label in results:
         above = "Ja" if similarity >= THRESHOLD else "Nej"
-        print(
-            f"{group_id:>5}  {similarity:.3f}   "
-            f"{above:<13} {label}"
-        )
+        print(f"{group_id:>5}  {similarity:.3f}   {above:<13} {label}")
 
     print("\nObs: Detta mäter enbart parlikhet, inte slutlig gruppering.")
 

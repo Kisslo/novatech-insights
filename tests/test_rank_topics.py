@@ -1,6 +1,6 @@
 import pytest
 
-from rank_topics import calculate_time_decay, count_distinct_sources
+from rank_topics import calculate_time_decay, calculate_velocity, count_distinct_sources
 
 
 def test_count_distinct_sources_counts_each_source_once():
@@ -73,3 +73,39 @@ def test_time_decay_rejects_non_positive_half_life(half_life_days):
 def test_time_decay_rejects_negative_age():
     with pytest.raises(ValueError):
         calculate_time_decay(age_days=-1, half_life_days=3)
+
+
+@pytest.mark.parametrize(
+    ("recent_count", "previous_count", "previous_days", "expected"),
+    [
+        (6, 14, 7, 3.0),
+        (2, 14, 7, 1.0),
+        (0, 14, 7, 0.0),
+        (3, 0, 7, 3.0),
+        (3, 2, 7, 3.0),
+        (6, 12, 3, 1.5),
+    ],
+)
+def test_calculate_velocity(recent_count, previous_count, previous_days, expected):
+    result = calculate_velocity(recent_count, previous_count, previous_days)
+
+    assert result == pytest.approx(expected)
+
+
+def test_calculate_velocity_defaults_to_seven_days():
+    assert calculate_velocity(6, 14) == pytest.approx(3.0)
+
+
+@pytest.mark.parametrize(
+    ("recent_count", "previous_count"),
+    [(-1, 14), (3, -1)],
+)
+def test_calculate_velocity_rejects_negative_counts(recent_count, previous_count):
+    with pytest.raises(ValueError, match="article counts must not be negative"):
+        calculate_velocity(recent_count, previous_count)
+
+
+@pytest.mark.parametrize("previous_days", [0, -7])
+def test_calculate_velocity_rejects_invalid_previous_days(previous_days):
+    with pytest.raises(ValueError, match="previous_days must be greater than zero"):
+        calculate_velocity(3, 14, previous_days)

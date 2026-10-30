@@ -11,9 +11,10 @@ Sources:
         id, score, article_count, source_count
     TOPICS_ARTICLES_VIEW (default topic_top_articles):
         topic_id, news_id, title, source, link, description, rank_in_topic
-  Topics are limited to --top before their articles are read, and only
-  articles with rank_in_topic 1-3 are read. Only the read functions depend
-  on the schema (#26). Supabase is only read, never written.
+    Topics without articles are left out, then topics are limited to --top
+        before their articles are read, and only articles with rank_in_topic 1-3
+        are read. The top-3 rule itself is decided in the view. Only the read
+        functions depend on the schema (#26). Supabase is only read, never written.
 
 The list is saved in output/top<N>_<date>_<time>.md.
 
@@ -144,11 +145,22 @@ def normalize_topic(raw: dict) -> dict:
     }
 
 
+def has_articles(raw: dict) -> bool:
+    """True if a topic has linked articles (same rule as article_count=gt.0)."""
+    if "article_count" in raw:
+        return raw["article_count"] > 0
+    return bool(raw.get("articles"))
+
+
 def load_fixture(path: Path) -> list[dict]:
-    """Read topics from a JSON file with the same fields as the read interface."""
+    """Read topics from a JSON file with the same fields as the read interface.
+
+    Topics without articles are left out before --top is applied, the same
+    way as the article_count=gt.0 filter in load_supabase.
+    """
     with path.open(encoding="utf-8") as f:
         data = json.load(f)
-    return [normalize_topic(topic) for topic in data["topics"]]
+    return [normalize_topic(topic) for topic in data["topics"] if has_articles(topic)]
 
 
 class ReadError(Exception):
@@ -207,6 +219,7 @@ def load_supabase(top: int) -> list[dict]:
     articles_view = view_name("TOPICS_ARTICLES_VIEW", DEFAULT_ARTICLES_VIEW)
 
     # Choose the topics first, so the article rows cannot reduce the topic count.
+    # Topics without articles are left out before the --top limit (agreed in #29).
     topic_rows = supabase_get(
         base_url,
         key,
@@ -214,6 +227,7 @@ def load_supabase(top: int) -> list[dict]:
         {
             "select": "id,score,article_count,source_count",
             "score": "not.is.null",
+            "article_count": "gt.0",
             "order": "score.desc,id.asc",
             "limit": str(top),
         },

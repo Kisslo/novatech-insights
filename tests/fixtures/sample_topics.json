@@ -1,5 +1,5 @@
 {
-  "_comment": "Example ranked topics for #27. Fictional articles (example.com). Same fields as the planned read interface in #26: topic id, score, article_count, source_count and up to 3 articles per topic in rank order.",
+  "_comment": "Example ranked topics for #27. Fictional articles (example.com). Same fields as the planned read interface in #26: topic id, score, article_count, source_count and up to 3 articles per topic in rank order. Articles follow the agreed top-3 rule: with description first, max one per source, newest, news_id ascending (dates are not part of the read interface, so the date order is assumed).",
   "topics": [
     {
       "id": 101,
@@ -44,18 +44,18 @@
           "description": "Several mid-sized accounting firms report fewer manual hours after testing AI agents that match invoices with payments."
         },
         {
+          "news_id": 1013,
+          "title": "Survey: half of accountants now use generative AI weekly",
+          "source": "Example Accounting Weekly",
+          "link": "https://example.com/accounting/survey-accountants-generative-ai",
+          "description": "A new survey shows that generative AI has become a weekly tool for many accountants, mostly for drafting emails and reports."
+        },
+        {
           "news_id": 1012,
           "title": "Redovisningsbyråer automatiserar bokslutet",
           "source": "Exempel Ekonomi",
           "link": "https://example.com/ekonomi/redovisningsbyraer-automatiserar-bokslut",
           "description": ""
-        },
-        {
-          "news_id": 1013,
-          "title": "Survey: half of accountants now use generative AI weekly",
-          "source": "Example Finance Today",
-          "link": "https://example.com/finance/survey-accountants-generative-ai",
-          "description": "A new survey shows that generative AI has become a weekly tool for many accountants, mostly for drafting emails and reports."
         }
       ]
     },
@@ -93,20 +93,6 @@
           "source": "Example Tech News",
           "link": "https://example.com/tech/open-source-model-laptop",
           "description": "A new open-source language model can run locally on an ordinary laptop."
-        },
-        {
-          "news_id": 1032,
-          "title": "Why local AI models matter for privacy",
-          "source": "Example Tech News",
-          "link": "https://example.com/tech/local-ai-models-privacy",
-          "description": "Running AI models locally keeps sensitive data inside the company."
-        },
-        {
-          "news_id": 1033,
-          "title": "Benchmark: local models close the gap",
-          "source": "Example Tech News",
-          "link": "https://example.com/tech/benchmark-local-models",
-          "description": "Independent tests show smaller local models catching up on common office tasks."
         }
       ]
     },

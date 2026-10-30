@@ -86,6 +86,23 @@ def test_missing_description_becomes_empty_string():
     assert normalize_topic(raw)["articles"][0]["description"] == ""
 
 
+def test_top_n_skips_topics_without_articles_before_the_limit(tmp_path):
+    topics = [
+        make_topic(1, 0.99, article_count=0, source_count=0),
+        make_topic(2, 0.95),
+        make_topic(3, 0.90, n_articles=0),
+        make_topic(4, 0.80),
+        make_topic(5, 0.70),
+    ]
+    topics[0]["articles"] = []
+    path = tmp_path / "topics.json"
+    path.write_text(json.dumps({"topics": topics}), encoding="utf-8")
+
+    selected = select_top(load_fixture(path), 2)
+
+    assert [t["id"] for t in selected] == [2, 4]
+
+
 @pytest.mark.parametrize("field", ["id", "score", "articles"])
 def test_topic_without_required_field_is_rejected(field):
     raw = make_topic(1, 0.5)
@@ -258,7 +275,9 @@ def test_dry_run_reports_fewer_topics_than_asked(monkeypatch, capsys):
 
 def test_broken_fixture_stops_with_clear_message(tmp_path, monkeypatch):
     path = tmp_path / "topics.json"
-    path.write_text(json.dumps({"topics": [{"id": 1}]}), encoding="utf-8")
+    broken = make_topic(1, 0.5)
+    del broken["score"]
+    path.write_text(json.dumps({"topics": [broken]}), encoding="utf-8")
     monkeypatch.setattr(
         "sys.argv", ["label_topics.py", "--fixture", str(path), "--dry-run"]
     )
@@ -425,6 +444,7 @@ def test_supabase_reads_topics_then_their_top_three_articles(
     )
     assert first["order"] == ["score.desc,id.asc"]
     assert first["score"] == ["not.is.null"]
+    assert first["article_count"] == ["gt.0"]
     assert first["limit"] == ["3"]
     assert second["topic_id"] == ["in.(5,8,9)"]
     assert second["rank_in_topic"] == ["lte.3"]

@@ -22,3 +22,10 @@ data/news_with_topics_backup.csv
 
 # Generated content output
 output/
+
+# Generated content output
+output/
+
+# Generated experiment audit reports
+experiments/data/audit_result.txt
+experiments/data/audit_groups_for_review.json

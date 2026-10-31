@@ -40,6 +40,26 @@ The dated sections below describe earlier verification stages.
 Their pending-work statements and example-query results are
 historical; this section records the current status.
 
+## Permission verification - 2026-10-31
+
+sql/test_topic_permissions.sql passed locally and in GitHub CI.
+Both CI jobs passed on commit 476780f.
+
+Verified with test roles:
+
+- A role without view permissions cannot read either view.
+- View grants alone do not provide underlying table access.
+- A reader with SELECT grants but no matching RLS policies
+  sees no rows.
+- Both views respect the reader's row-security policies.
+- Counts include only articles visible to the reader.
+
+Test roles, policies, grants and rows were rolled back.
+
+These checks verify the views with local test permissions.
+Final backend grants, Supabase roles and production access
+still require agreement and verification.
+
 ## Test environment
 
 - Container: novatech-topic-test

@@ -38,3 +38,82 @@ jobs:
 
       - name: Run tests
         run: uv run --locked python -m pytest
+
+  sql-tests:
+    name: PostgreSQL migrations and topic counts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-test-only
+          POSTGRES_DB: novatech_test
+        options: >-
+          --health-cmd "pg_isready -U postgres -d novatech_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Apply migrations to empty test database
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          for migration in \
+            sql/001_create_news.sql \
+            sql/002_create_topic_storage.sql \
+            sql/003_create_topics_and_links.sql \
+            sql/004_create_topic_read_views.sql
+          do
+            echo "Applying $migration"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d novatech_test \
+              -v ON_ERROR_STOP=1 < "$migration"
+          done
+
+      - name: Report database versions
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$TEST_CONTAINER" \
+            psql -X -U postgres -d novatech_test \
+            -v ON_ERROR_STOP=1 \
+            -c "SELECT current_setting('server_version') AS postgres_version, extversion AS vector_version FROM pg_extension WHERE extname = 'vector';"
+
+      - name: Run topic count assertions
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$TEST_CONTAINER" \
+            psql -X -U postgres -d novatech_test \
+            -v ON_ERROR_STOP=1 < sql/test_topic_counts.sql
+
+      - name: Run topic relationship assertions
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$TEST_CONTAINER" \
+            psql -X -U postgres -d novatech_test \
+            -v ON_ERROR_STOP=1 < sql/test_topic_constraints.sql
+
+      - name: Run topic selection assertions
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$TEST_CONTAINER" \
+            psql -X -U postgres -d novatech_test \
+            -v ON_ERROR_STOP=1 < sql/test_topic_selection.sql
+
+      - name: Run topic permission assertions
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$TEST_CONTAINER" \
+            psql -X -U postgres -d novatech_test \
+            -v ON_ERROR_STOP=1 < sql/test_topic_permissions.sql

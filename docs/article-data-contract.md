@@ -1,427 +1,397 @@
-# Article Data Contract
+# News and Topics Data Contract
 
-Status: Proposed for final review under issue #4 / PR #10.
+Status: Draft for team review under issue #26 and PR #39.
+Assessment and migration planning are tracked in PR #29.
 
-This document defines the target agreement between Data, Topics,
-and Content. Current behavior and pending implementation are
-identified separately.
+This document describes the Week 44 target and distinguishes it
+from implemented functionality. It does not apply database changes.
 
-The Content view name and completion marker reflect the agreement
-recorded in issue #26. Final review of this contract remains pending.
+## Scope and implementation status
 
-This documentation does not migrate data or rename tables.
+The target workflow is:
+
+1. Collect and validate articles.
+2. Store original article metadata in public.news.
+3. Generate embeddings and group articles into topics.
+4. Store article-topic relationships.
+5. Calculate topic ranking scores.
+6. Read ranked topics and their selected articles.
+7. Generate topic labels and relevance explanations.
+
+public.news already exists in Supabase.
+Draft migrations 002–004 implement embedding storage, topics,
+article-topic relationships and the two read views.
+
+The views and their count and article-selection tests passed
+locally. Both GitHub CI jobs passed on commit e9ba74f.
+These migrations have not been applied to Supabase.
+
+Backend permissions, deployment compatibility and full-workflow
+integration still require verification.
+
+An article can belong to several topics.
+Do not use news.topic_id as the membership relationship.
+
+The earlier news_articles.news_id, categorized_at and
+content_articles design is superseded as the Week 44 target.
+Existing dependencies must still be checked before any retirement.
+
+Posts, article generation and generated-output storage are deferred.
 
 ## References
 
-- [README](../README.md): setup and execution instructions.
-- [Collected-news SQL](../sql/001_create_news.sql): current news schema.
-- [Collector](../src/collect_news.py): RSS collection.
-- [Uploader](../src/store_news.py): CSV validation and insertion.
-- [Issue #26](https://github.com/Kisslo/novatech-insights/issues/26):
-  table relationship, migration, Content read interface, and verification.
-- [Issue #19](https://github.com/Kisslo/novatech-insights/issues/19):
-  Python categorization through n8n.
-- [Issue #27](https://github.com/Kisslo/novatech-insights/issues/27):
-  Content reading categorized Supabase articles.
-- [Issue #28](https://github.com/Kisslo/novatech-insights/issues/28):
-  generated-output storage and transactional summary saving.
+- [Collected-news schema](../sql/001_create_news.sql)
+- [Draft embedding migration](../sql/002_create_topic_storage.sql)
+- [Local verification](topic-storage-verification.md)
+- [Collector](../src/collect_news.py)
+- [Uploader](../src/store_news.py)
+- [Issue #26](https://github.com/Kisslo/novatech-insights/issues/26): storage and read interface.
+- [PR #29](https://github.com/Kisslo/novatech-insights/pull/29): assessment and migration plan.
+- [PR #39](https://github.com/Kisslo/novatech-insights/pull/39): draft implementation.
+- [Issue #19](https://github.com/Kisslo/novatech-insights/issues/19): embeddings and grouping.
+- [Issue #35](https://github.com/Kisslo/novatech-insights/issues/35): ranking.
+- [Issue #27](https://github.com/Kisslo/novatech-insights/issues/27): labels and top-N output.
+- [Issue #36](https://github.com/Kisslo/novatech-insights/issues/36): integration verification.
+- [Issue #37](https://github.com/Kisslo/novatech-insights/issues/37): feedback.
+- [Issue #38](https://github.com/Kisslo/novatech-insights/issues/38): README updates.
 
-## Table roles and implementation status
+## Collected articles: public.news
 
-| Table | Role | Owner |
+Data owns original metadata and publisher RSS descriptions.
+
+| Column | PostgreSQL type | Rule |
 |---|---|---|
-| `public.news` | Collected article metadata and RSS description. | Data |
-| `public.news_articles` | Categorized articles and assigned category. | Topics |
+| id | bigint | Generated identity primary key. |
+| title | text | Required and non-blank. |
+| link | text | Required, non-blank and unique. |
+| source | text | Required; uploader rejects blank values. |
+| published | timestamptz | Required publication time. |
+| subject | text | Legacy field; not authoritative topic membership. |
+| description | text | Publisher RSS description; empty string allowed. |
+| collected_at | timestamptz | First database insertion time; defaults to now(). |
+| embedding | vector(384) | Proposed nullable addition; tested locally only. |
 
-Both tables exist. The inspected current schema contains no declared
-relationship between them.
+The eight original columns are NOT NULL.
+subject and description default to empty strings.
+collected_at is database insertion time, not RSS retrieval time.
 
-The target relationship, `categorized_at` marker, and Content read
-view described below are pending implementation and verification
-in #26. Categorization integration is tracked in #19; Content
-consumption is tracked in #27.
+Keep original metadata unchanged during grouping and ranking.
+Generated labels and explanations must not replace RSS descriptions.
 
-Generated-output storage and summary-saving implementation are
-tracked separately in #28.
+### Embeddings
 
-Do not assume existing records already satisfy this target contract.
+Turker confirmed:
 
-## Collected article fields
+- Model: paraphrase-multilingual-MiniLM-L12-v2.
+- Dimensions: 384.
+- Input: article title and RSS description.
 
-The collector produces these CSV columns:
+The draft migration uses extensions.vector(384).
+NULL means no embedding is stored; it does not distinguish
+unprocessed articles from failed attempts.
 
-```text
-title,link,source,published,subject,description
-```
+Before completing the implementation, agree:
 
-| CSV field | `news` column | PostgreSQL type | Rule |
-|---|---|---|---|
-| None | `id` | `bigint` | Generated identity primary key. Shared collected-article ID. |
-| `title` | `title` | `text` | Required and non-blank. |
-| `link` | `link` | `text` | Required, non-blank, and UNIQUE. |
-| `source` | `source` | `text` | Required and non-blank at upload; SQL enforces NOT NULL. |
-| `published` | `published` | `timestamptz` | Required publication instant. |
-| `subject` | `subject` | `text` | Legacy field retained for compatibility; not authoritative classification in the target database workflow. |
-| `description` | `description` | `text` | Cleaned publisher RSS description; empty string allowed. |
-| None | `collected_at` | `timestamptz` | First database insertion time, default `now()`. |
+- Exact input construction and missing-description handling.
+- Model and input version tracking.
+- Detection of changed input and outdated embeddings.
+- Failure handling and regeneration rules.
+- Extension version and schema in the deployment environment.
 
-All current `news` columns are NOT NULL.
-`subject` and `description` default to empty strings.
+Turker owns embedding generation and grouping under #19.
+Nosheen owns the agreed storage and constraints under #26.
 
-`collected_at` records database insertion time, not the original
-RSS retrieval time.
+## Topic storage
 
-## Shared identity and target relationship
+The proposed table name is public.topics.
+Final table names require team confirmation.
 
-The target `news_articles.news_id` column is:
+Confirmed field requirements:
 
-- `bigint`
-- NOT NULL
-- UNIQUE
-- A foreign key referencing `public.news(id)`
+| Field | Purpose | Writer |
+|---|---|---|
+| id | Stable topic identifier. | Database |
+| score | Calculated ranking score. | Mathias, #35 |
+| score_calculated_at | Time the score was calculated. | Mathias, #35 |
+| score_version | Ranking formula version. | Mathias, #35 |
+| score_breakdown | Signals and their contributions. | Mathias, #35 |
+| label | Generated topic headline. | Nedal, #27 |
+| why_relevant_sv | Relevance explanation in Swedish. | Nedal, #27 |
+| llm_relevance | AI relevance rating from 1 to 5. | Nedal, #27 |
 
-This permits zero or one categorized record per collected article.
-Every categorized record must reference an existing collected article.
-Invalid references and duplicate `news_id` values must be rejected.
+Use llm_relevance instead of the earlier name relevance.
+Whether it contributes to score remains an open decision under #35.
 
-`news_articles.id` remains that table's own primary key.
-It must not be assumed to equal `news.id`.
+Field types, defaults and nullability remain draft decisions.
+Confirm whether llm_relevance permits integers only or also decimals.
 
-Use `news.id`, exposed as `news_id`, for shared article traceability.
-IDs remain stable while records exist in this database; they are
-not portable across databases or deletion and reinsertion.
+Also agree:
 
-## Duplicate handling
+- Score scale, refresh rules and score_breakdown structure.
+- Handling of failed or incomplete scoring and labelling.
+- Topic identity and regrouping rules.
+- Invalidation of labels and scores when memberships change.
 
-The same exact stored link identifies the same collected article.
+Earlier suggestions such as velocity, swedish_signal, first_seen,
+last_seen and status are not confirmed as separate stored columns.
 
-The uploader trims surrounding whitespace, keeps the first valid
-input record for a repeated link, and skips links already stored.
-Existing database metadata and legacy subjects are preserved.
+## Article-topic linking table
 
-URL normalization, redirect resolution, tracking-parameter removal,
-and cross-publisher story deduplication are not implemented.
-Different URLs may describe the same story.
+The proposed name topic_articles is not yet confirmed.
 
-CSV input has no database ID. Matching it to stored records requires
-the exact stored link and verification of the resulting `news.id`.
-Never link records by assuming their numeric IDs correspond.
-
-Once a database-backed Content reader supplies `news_id`, preserve
-that ID throughout the flow. Do not resolve summary source references
-again by link.
-
-## Field ownership and legacy columns
-
-Data owns `title`, `link`, `source`, `published`, and RSS
-`description` in `news`.
-
-Topics owns `category` and successful classification state in
-`news_articles`.
-
-Content owns generated topic summaries and drafts.
-
-In the target workflow:
-
-- `news_articles.category` is the authoritative assigned classification.
-- `news.subject` is retained for now but must not become a competing
-  classification source.
-- Content reads original metadata and RSS description from `news`.
-- Duplicated metadata in `news_articles` is legacy data and must not
-  override `news` metadata in the Content interface.
-- `news_articles.summary` must not substitute for RSS description
-  or Content's multi-article topic summaries.
-
-Existing writers and provisional data must be inspected before
-changing how legacy fields are maintained. No columns or tables
-are renamed or removed by this documentation.
-
-## Topic labels and classification state
-
-The proposed allowed list for final Data and Topics review is the
-13-label list used by the inspected classifier:
-
-- AI and LLMs
-- AI agents and assistants
-- AI automation and workflows
-- Software and APIs
-- Cloud and DevOps
-- Cybersecurity
-- Startups and funding
-- Robotics and autonomous systems
-- Consumer Technology and Wearables
-- Technology Events
-- Energy and Climate Technology
-- Business and Finance
-- Other
-
-This replaces the earlier ten-label proposal for review.
-Approval of this list must be confirmed before the contract is final.
-Readers and writers must use the same agreed labels.
-
-Publisher-provided RSS categories are external metadata and may be
-classifier inputs. They are not our assigned classification.
-
-`Other` means categorization completed without another matching label.
-It does not imply human review or approval.
-
-An existing default category of `Other` alone does not prove that
-categorization ran successfully.
-
-### Successful categorization marker
-
-The agreed target completion marker is
-`news_articles.categorized_at`, a nullable `timestamptz` column.
-
-- NULL means classification completion has not been verified.
-- A non-NULL timestamp records successful classification or explicit
-  verification of an existing classification.
-- Set `categorized_at` together with a valid category in the same
-  transaction, only after classification succeeds or is verified.
-- A successfully assigned `Other` category is eligible when this
-  completion marker is set.
-- Failed attempts must not set the marker or overwrite existing
-  successful assignments.
-
-Existing provisional records remain unmarked and excluded from
-Content until verified or reclassified. Do not backfill
-`categorized_at` merely because a category value already exists.
-
-Existing assignments must not be overwritten unintentionally.
-Intentional reclassification must be explicit and documented.
-
-Schema implementation and verification are tracked in #26.
-Writer behavior and categorization execution are tracked in #19.
-These are agreed target rules, not yet implemented functionality.
-
-## Content read interface
-
-The agreed target backend read view is `public.content_articles`.
-Content readers use this name by default and keep it configurable.
-
-The view joins:
-
-```sql
-news_articles.news_id = news.id
-```
-
-Only records linked to an existing collected article, with a valid
-agreed category and non-NULL `news_articles.categorized_at`, are eligible.
-
-The interface exposes exactly these seven fields:
-
-| Output field | Source |
+| Field | Requirement |
 |---|---|
-| `news_id` | `news.id` |
-| `title` | `news.title` |
-| `link` | `news.link` |
-| `source` | `news.source` |
-| `published` | `news.published` |
-| `subject` | `news_articles.category` |
-| `description` | `news.description` |
+| news_id | NOT NULL bigint referencing public.news(id). |
+| topic_id | NOT NULL reference matching the final topics.id type. |
 
-The output `subject` is an interface name for the assigned category.
-It is not read from `news.subject`.
+Require a unique pair of news_id and topic_id.
+Neither field is individually unique.
 
-The completion marker is used for eligibility; it is not an additional
-field in this seven-field interface.
+For example, article 101 may link to topics 5 and 8.
+The pair (101, 5) must not be stored twice.
 
-Illustrative target view query, usable only after the relationship,
-completion marker, and allowed-category validation are implemented:
+Reject references to missing articles or topics.
+The draft implementation uses ON DELETE RESTRICT for both
+foreign keys. Linked articles and topics cannot be deleted.
+This behavior is tested; team review and regrouping rules
+remain pending.
 
-```sql
-SELECT
-    n.id AS news_id,
-    n.title,
-    n.link,
-    n.source,
-    n.published,
-    a.category AS subject,
-    n.description
-FROM public.news AS n
-JOIN public.news_articles AS a
-    ON a.news_id = n.id
-WHERE a.categorized_at IS NOT NULL;
-```
 
-This example assumes allowed-category validation is enforced by the
-implemented schema or interface. A timestamp alone does not validate
-a category label.
+Whether to store similarity remains open.
+Its meaning, scale and update rules must be agreed if included.
 
-The implemented view must exclude unverified, failed, and incomplete
-classification results. Legacy records must not be marked complete
-without verification or reclassification.
+Do not store rank_in_topic.
 
-Missing RSS descriptions must not cause Content reading to fail.
-The shared `news_id` and source link must remain available throughout
-selection, summary generation, and source-reference saving.
+## Ranked-topic read interface
 
-Creation, permissions, and verification of the view are tracked in #26.
-The Content reader implementation is tracked in #27.
+The draft read interface is implemented in
+sql/004_create_topic_read_views.sql.
 
-### Illustrative interface record
+### public.topic_overview
 
-```json
-{
-  "news_id": 123,
-  "title": "Example AI assistant announcement",
-  "link": "https://example.com/news/assistant",
-  "source": "Example Publisher",
-  "published": "2026-10-22T08:00:00Z",
-  "subject": "AI agents and assistants",
-  "description": ""
-}
-```
+Returns one row per topic with:
 
-The ID and article are illustrative. An empty description is valid.
+- id
+- label
+- why_relevant_sv
+- llm_relevance
+- score
+- article_count
+- source_count
 
-## Publication dates and collection window
+Counts include all articles linked to the topic, before selecting
+the displayed articles. No publication-date filter is applied
+inside this view.
 
-`published` is the publication time, not collection or insertion time.
-Exchange timestamps as timezone-aware UTC values, for example:
+Empty topics remain visible with zero counts. The reader must
+filter article_count > 0 before selecting the top topics.
 
-```text
-2026-10-22T08:00:00Z
-```
+### public.topic_top_articles
 
-`Z` means UTC. PostgreSQL clients may display `timestamptz` values in a
-different session timezone.
+Returns up to three articles per topic with:
 
-The collector accepts supported RSS or ISO publication dates and
-converts them to UTC. Missing, blank, invalid, timezone-free, and
-future dates are rejected rather than guessed.
+- topic_id
+- rank_in_topic
+- news_id
+- title
+- source
+- link
+- description
 
-The collector retains articles published within the seven days
-preceding the start of its run, including the window boundaries.
-It applies the same checks to previously saved CSV rows.
+Original article metadata and news.id are preserved.
+rank_in_topic is calculated when reading, not stored.
 
-The uploader independently validates its input against a seven-day
-window and rejects missing, invalid, timezone-free, or future dates.
+### Article selection
 
-The collection window is not a database retention policy.
-Stored database articles are not automatically deleted.
+The confirmed Week 44 rule is:
 
-Any future retention process must consider dependent records and
-be separately agreed and implemented.
+1. Prefer articles with a non-empty description.
+2. Keep the best article from each source.
+3. Prefer newer publication dates.
+4. Use smaller news_id values to break remaining ties.
+5. Return up to three articles per topic.
+
+The implementation treats whitespace-only descriptions as empty.
+This clarification should be recorded for team review.
+
+Both source selection and final article ranking use description
+presence, publication date descending and news_id ascending.
+
+Sources are compared using their stored source values.
+No source-name normalization is performed by these views.
+
+Readers must explicitly order selected articles by topic_id
+and rank_in_topic.
+
+### Topic selection and counts
+
+The Week 44 target remains up to 20 topics.
+The reader controls the topic limit and explicit topic ordering.
+
+Filter empty topics and select the ranked topics before expanding
+their article rows. Do not apply the topic limit to joined
+article rows.
+
+For example, a topic containing four articles from two sources
+displays two articles, one per source. Its counts remain:
+
+- article_count = 4
+- source_count = 2
+
+Topic ranking tie-breaking, eligibility and freshness rules
+still need alignment with the ranking implementation.
+Similarity is not stored or used by these views.
+
+### Permissions
+
+Both views use security_invoker = true.
+Readers need the appropriate view and underlying table permissions.
+Underlying row-security rules apply to the reader.
+
+Full-topic counts require access to all relevant linked rows.
+Backend grants and permission tests remain pending.
+
+## Article identity and duplicates
+
+Use news.id as the shared article identifier.
+Do not assume IDs from different tables refer to the same article.
+
+IDs remain stable while records exist in this database.
+They are not portable across databases or deletion and reinsertion.
+
+The uploader trims surrounding whitespace from links, keeps the
+first valid input record for each repeated link and skips links
+already stored. Existing database metadata is preserved.
+
+URL normalization, redirect resolution, tracking-parameter removal
+and cross-publisher story deduplication are not implemented.
+
+CSV input has no database ID. Resolve it using the exact stored
+link and verify the resulting news.id.
+
+Once news_id is available, preserve it instead of repeatedly
+matching articles by link.
+
+## Dates and collection window
+
+published is publication time, not collection or insertion time.
+
+Exchange timezone-aware UTC timestamps, for example:
+
+2026-10-28T08:00:00Z
+
+The collector accepts supported RSS or ISO dates and converts
+them to UTC. Missing, invalid, timezone-free and future dates
+are rejected rather than invented.
+
+The collector retains articles within the seven days preceding
+the start of its run, including the boundaries. It also checks
+previously saved CSV rows.
+
+The uploader independently validates a seven-day window.
+
+This collection window is not a database retention policy.
+Stored articles are not automatically deleted.
 
 ## RSS descriptions and CSV exchange
 
-Descriptions come from publishers' RSS feeds.
+CSV columns remain:
+
+title,link,source,published,subject,description
+
+Use UTF-8 with BOM and a header row.
+Python readers should use utf-8-sig and a CSV parser.
 
 The collector removes HTML formatting, preserves common text
-boundaries, decodes HTML character references, and normalizes
-whitespace.
+boundaries, decodes HTML character references and normalizes
+whitespace in RSS descriptions.
 
-Descriptions are not generated summaries or verified full article
-content. Their length varies, and missing values become empty strings.
-The collector does not fetch article pages to fill them.
+Descriptions are publisher input, not generated summaries or
+verified full article text. Missing descriptions become empty
+strings. Article pages are not fetched to fill them.
 
-CSV exchange uses UTF-8 with BOM and a header row.
-Python readers should use `utf-8-sig` and a CSV parser because values
-can contain commas, quotes, and line breaks.
+The collector can fill missing CSV descriptions from feeds.
+The uploader skips existing links, so CSV enrichment does not
+automatically update existing database rows.
 
-The collector preserves existing CSV descriptions and can fill
-missing descriptions from feeds. The current uploader skips existing
-database links, so later CSV enrichment does not update stored rows.
+Missing descriptions must not cause Content reading to fail.
+Their treatment during embedding generation remains to be agreed.
 
-## Migration and provisional records
+## Legacy data and migration
 
-Issue #26 must inspect existing `news_articles` records, constraints,
-and current writers before preparing the migration.
+Preserve existing news, news_articles and rss_feeds data.
 
-Match records using verified article identity, such as exact links.
-Assess unmatched links, duplicates, and ambiguous matches explicitly.
-Do not assume matching table IDs and do not delete unmatched records
-without explicit approval.
+Legacy categories and news.subject do not establish membership
+in the new topic model. Do not automatically convert them.
 
-Record a reviewed migration plan before enforcing the target
-NOT NULL, UNIQUE, and foreign-key constraints.
+news_articles.summary must not replace news.description.
 
-Preserve existing data and document how provisional records are
-handled. Existing category values must not automatically result
-in a populated `categorized_at` marker.
+Inspect readers, writers and dependencies before changing legacy
+storage. Historical inspection counts must be refreshed before
+migration.
 
-Commit migration SQL, verification results, and access instructions.
-Keep #26 open until implementation and verification are linked.
+Do not:
 
-## Access
+- Assume matching numeric IDs across tables.
+- Invent missing publication dates.
+- Delete unmatched records without explicit approval.
+- Drop legacy tables through this draft implementation.
 
-Use a backend connection with appropriate permissions.
-Credentials belong in local environment variables or deployment
-secret configuration, never in Git or frontend code.
+PR #29 records assessment and migration planning.
+PR #39 contains the draft implementation and local verification.
 
-RLS is enabled on `news`. The existing uploader uses a backend secret
-key; it does not add client-facing RLS policies.
+## Access and verification
 
-The relationship and read-interface implementation must document
-permissions for both tables and `public.content_articles`.
-Do not assume a view automatically provides appropriate access controls.
+Use backend credentials stored in environment variables or
+deployment secrets. Never commit them or expose them in frontend code.
 
-## Generated Content storage
+RLS is enabled on news.
+Define and test the required permissions for new tables and the
+read interface. Do not automatically copy legacy broad grants.
 
-Generated multi-article summaries and drafts are separate from RSS
-descriptions and category assignment.
+A view does not automatically provide appropriate access control.
 
-The generated-output storage design, implementation, and tests are
-tracked separately in
-[issue #28](https://github.com/Kisslo/novatech-insights/issues/28).
+Verification must cover:
 
-### Preserve source identity
+- Preservation of original articles and IDs.
+- Valid embedding dimensions and allowed missing embeddings.
+- Multiple topics per article.
+- Rejection of duplicate pairs and invalid references.
+- Correct counts before article display limits.
+- Agreed topic and article ordering.
+- Repeatable writes without unintended duplicates.
+- Failed processing and stale-result handling.
+- Backend permissions and denied unauthorized access.
+- Integration with grouping, ranking and Content readers.
 
-Content must preserve `news_id` from the read interface throughout
-selection, summary generation, and saving source references.
+Local test results do not establish production deployment.
+Test against the intended deployment versions before rollout.
 
-Use these supplied IDs when saving sources. Do not match the articles
-again by link.
+## Remaining decisions and checks
 
-Source references use foreign keys to `public.news(id)`.
-The article link remains available for attribution, but it does not
-replace `news_id` as the database reference.
+The two read views and the confirmed Week 44 article-selection
+rule are implemented and tested in draft PR #39.
 
-### Save summaries and sources atomically
+The following items remain:
 
-Save each summary and all its source references in one database
-transaction.
+- Team review of the implemented table names, field types,
+  defaults and nullability.
+- Confirmation of the integer-only llm_relevance contract.
+- Embedding metadata, missing-description handling and
+  regeneration rules.
+- Topic identity and regrouping behavior.
+- Review of ON DELETE RESTRICT for linked articles and topics.
+- Whether similarity should be stored and used in future.
+- Team review of whitespace-only descriptions being treated
+  as empty.
+- Topic ranking tie-breaking, eligibility and time windows.
+- Source identity and normalization rules.
+- Scoring and labelling freshness and failure behavior.
+- Backend permissions and tests of unauthorized access.
+- Supabase compatibility and preservation of existing data.
+- Integration with grouping, ranking and the Content reader.
+- Migration review, deployment responsibility and procedure.
 
-If any supplied `news_id` does not exist in `public.news`, the entire
-save must roll back. No partial summary or incomplete set of source
-references may remain.
-
-Do not silently omit invalid source IDs and save a partial result.
-
-Implementation and tests for `save_summary`, including successful
-saving and rollback on invalid source IDs, belong to #28.
-
-These are shared contract requirements. This document does not
-implement or approve the complete generated-output table design.
-
-## Follow-up tracking and acceptance
-
-- #26: table relationship, safe migration, `categorized_at`,
-  `public.content_articles`, access documentation, and verification.
-- #19: Python categorization from `news` into `news_articles` using
-  `news_id`, setting the completion marker with a valid category,
-  assignment preservation, and error handling.
-- #27: Content reading categorized Supabase records through the
-  configurable view, preserving IDs, selection behavior, isolated
-  tests, and a read-only dry-run test.
-- #28: generated-output storage, preserving supplied `news_id` values,
-  transactional summary/source saving, and rollback tests.
-
-Existing implementations should be linked and verified rather than
-rebuilt. Unimplemented work stays open in the relevant issue.
-
-Before closing #4:
-
-- [ ] Data and Topics confirm table roles and field ownership.
-- [ ] Shared identity, target constraints, and Content mapping are agreed.
-- [ ] Topics confirms the explicit allowed label list.
-- [ ] The agreed view name and completion-marker rules are reviewed.
-- [ ] Provisional-record handling is documented and remaining decisions tracked.
-- [ ] Date, description, duplicate, and retention rules are reviewed.
-- [ ] Source-ID preservation and transactional summary saving are documented.
-- [ ] Follow-up issues #26, #19, #27, and #28 are linked and aligned.
-- [ ] PR #10 is approved and merged.
-
-The integrations do not need to be implemented to complete this
-documentation task. Their pending work must remain traceable.
+Issue #26 remains open until implementation and verification
+are complete. PR #39 remains Draft.
+Migrations 002–004 have not been applied to Supabase.

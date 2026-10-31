@@ -60,6 +60,32 @@ These checks verify the views with local test permissions.
 Final backend grants, Supabase roles and production access
 still require agreement and verification.
 
+## Supabase default-permission tests - 2026-10-31
+
+Both CI jobs passed on commit 8c8c617.
+
+A separate local/CI database reproduces the inspected Supabase
+default grants for anon, authenticated and service_role.
+
+Verified:
+
+- Migrations 001–004 execute successfully with these defaults.
+- Automatic grants are removed from topics, topic_articles,
+  topic_overview, topic_top_articles and topics_id_seq.
+- Existing news grants remain unchanged.
+- Count, relationship, selection and row-security tests pass
+  in this environment.
+
+ Final backend grants are still pending. In the test database,
+service_role has no access to the new topic objects.
+Explicit backend grants still need to be defined.
+
+This is a simulation of the inspected permissions, not full
+Supabase compatibility verification. pgvector 0.8.2 compatibility
+and production integration remain unverified.
+
+No migrations were applied to Supabase during these checks.
+
 ## Test environment
 
 - Container: novatech-topic-test

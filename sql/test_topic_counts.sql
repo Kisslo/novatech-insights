@@ -1,11 +1,12 @@
--- Local test only. All test records are rolled back.
--- ID ordering is for testing, not the final selection rule.
+-- Local test only. Test rows are rolled back.
+-- Checks the actual views and full-topic counts.
 \set ON_ERROR_STOP on
 
 BEGIN;
 
 CREATE TEMP TABLE test_topic_ids (
-    id bigint PRIMARY KEY
+    id bigint PRIMARY KEY,
+    is_empty boolean NOT NULL
 ) ON COMMIT DROP;
 
 WITH new_topic AS (
@@ -13,72 +14,66 @@ WITH new_topic AS (
     VALUES ('Local article-count test')
     RETURNING id
 )
-INSERT INTO test_topic_ids (id)
-SELECT id FROM new_topic;
+INSERT INTO test_topic_ids (id, is_empty)
+SELECT id, false FROM new_topic;
+
+WITH new_topic AS (
+    INSERT INTO public.topics (label)
+    VALUES ('Local empty-topic test')
+    RETURNING id
+)
+INSERT INTO test_topic_ids (id, is_empty)
+SELECT id, true FROM new_topic;
 
 WITH new_articles AS (
     INSERT INTO public.news (title, link, source, published)
     VALUES
         ('Test article A', 'https://example.com/count-test-a',
-         'Source A', now()),
+         'Source A', '2026-10-28 12:00:00+00'),
         ('Test article B', 'https://example.com/count-test-b',
-         'Source A', now()),
+         'Source A', '2026-10-29 12:00:00+00'),
         ('Test article C', 'https://example.com/count-test-c',
-         'Source A', now()),
+         'Source A', '2026-10-30 12:00:00+00'),
         ('Test article D', 'https://example.com/count-test-d',
-         'Source B', now())
+         'Source B', '2026-10-30 13:00:00+00')
     RETURNING id
 )
 INSERT INTO public.topic_articles (topic_id, news_id)
 SELECT t.id, a.id
 FROM test_topic_ids AS t
-CROSS JOIN new_articles AS a;
+CROSS JOIN new_articles AS a
+WHERE NOT t.is_empty;
 
 CREATE TEMP TABLE test_display_results ON COMMIT DROP AS
-WITH topic_counts AS (
-    SELECT
-        ta.topic_id,
-        count(DISTINCT n.id) AS article_count,
-        count(DISTINCT n.source) AS source_count
-    FROM public.topic_articles AS ta
-    JOIN public.news AS n ON n.id = ta.news_id
-    JOIN test_topic_ids AS t ON t.id = ta.topic_id
-    GROUP BY ta.topic_id
-),
-selected_articles AS (
-    SELECT
-        ta.topic_id,
-        n.id AS news_id,
-        n.title,
-        n.source,
-        row_number() OVER (
-            PARTITION BY ta.topic_id ORDER BY n.id
-        ) AS rank_in_topic
-    FROM public.topic_articles AS ta
-    JOIN public.news AS n ON n.id = ta.news_id
-    JOIN test_topic_ids AS t ON t.id = ta.topic_id
-)
 SELECT
     a.topic_id,
     a.news_id,
     a.title,
     a.source,
     a.rank_in_topic,
-    c.article_count,
-    c.source_count
-FROM selected_articles AS a
-JOIN topic_counts AS c ON c.topic_id = a.topic_id
-WHERE a.rank_in_topic <= 3;
+    o.article_count,
+    o.source_count
+FROM public.topic_top_articles AS a
+JOIN public.topic_overview AS o
+    ON o.id = a.topic_id
+JOIN test_topic_ids AS t
+    ON t.id = a.topic_id
+WHERE NOT t.is_empty;
 
 DO $test$
 BEGIN
-    IF (SELECT count(*) FROM test_display_results) <> 3 THEN
-        RAISE EXCEPTION 'FAIL: expected 3 displayed articles';
+    IF (SELECT count(*) FROM test_display_results) <> 2 THEN
+        RAISE EXCEPTION 'FAIL: expected 2 displayed articles';
     END IF;
 
     IF (SELECT count(DISTINCT news_id)
-        FROM test_display_results) <> 3 THEN
+        FROM test_display_results) <> 2 THEN
         RAISE EXCEPTION 'FAIL: displayed articles must be distinct';
+    END IF;
+
+    IF (SELECT count(DISTINCT source)
+        FROM test_display_results) <> 2 THEN
+        RAISE EXCEPTION 'FAIL: expected 2 different sources';
     END IF;
 
     IF EXISTS (
@@ -91,20 +86,43 @@ BEGIN
             'FAIL: full counts must remain 4 articles and 2 sources';
     END IF;
 
-    IF EXISTS (
-        SELECT 1
+    IF (
+        SELECT array_agg(title ORDER BY rank_in_topic)
         FROM test_display_results
-        WHERE source IS DISTINCT FROM 'Source A'
-    ) THEN
+    ) IS DISTINCT FROM ARRAY[
+        'Test article D', 'Test article C'
+    ]::text[] THEN
         RAISE EXCEPTION
-            'FAIL: only Source A articles should be displayed';
+            'FAIL: expected newest Source B article, then newest Source A article';
     END IF;
 
     IF (
         SELECT array_agg(rank_in_topic ORDER BY rank_in_topic)
         FROM test_display_results
-    ) IS DISTINCT FROM ARRAY[1, 2, 3]::bigint[] THEN
-        RAISE EXCEPTION 'FAIL: expected article positions 1, 2 and 3';
+    ) IS DISTINCT FROM ARRAY[1, 2]::bigint[] THEN
+        RAISE EXCEPTION 'FAIL: expected article positions 1 and 2';
+    END IF;
+
+    IF (
+        SELECT count(*)
+        FROM public.topic_overview AS o
+        JOIN test_topic_ids AS t ON t.id = o.id
+        WHERE t.is_empty
+          AND o.article_count = 0
+          AND o.source_count = 0
+    ) <> 1 THEN
+        RAISE EXCEPTION
+            'FAIL: empty topic must appear with zero counts';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM public.topic_top_articles AS a
+        JOIN test_topic_ids AS t ON t.id = a.topic_id
+        WHERE t.is_empty
+    ) THEN
+        RAISE EXCEPTION
+            'FAIL: empty topic must have no selected articles';
     END IF;
 
     RAISE NOTICE 'PASS: all topic-count assertions passed';

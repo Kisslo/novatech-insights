@@ -109,3 +109,11 @@ jobs:
           docker exec -i "$TEST_CONTAINER" \
             psql -X -U postgres -d novatech_test \
             -v ON_ERROR_STOP=1 < sql/test_topic_selection.sql
+
+      - name: Run topic permission assertions
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$TEST_CONTAINER" \
+            psql -X -U postgres -d novatech_test \
+            -v ON_ERROR_STOP=1 < sql/test_topic_permissions.sql

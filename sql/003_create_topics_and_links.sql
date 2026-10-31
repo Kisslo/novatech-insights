@@ -88,6 +88,31 @@ ALTER TABLE public.topic_articles ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE public.topics FROM PUBLIC;
 REVOKE ALL ON TABLE public.topic_articles FROM PUBLIC;
+REVOKE ALL ON SEQUENCE public.topics_id_seq FROM PUBLIC;
+
+-- Remove automatic grants when Supabase roles exist.
+-- Final backend grants will be defined separately.
+DO $permissions$
+DECLARE
+    role_name text;
+BEGIN
+    FOR role_name IN
+        SELECT rolname
+        FROM pg_roles
+        WHERE rolname IN ('anon', 'authenticated', 'service_role')
+    LOOP
+        EXECUTE format(
+            'REVOKE ALL ON TABLE public.topics, public.topic_articles FROM %I',
+            role_name
+        );
+
+        EXECUTE format(
+            'REVOKE ALL ON SEQUENCE public.topics_id_seq FROM %I',
+            role_name
+        );
+    END LOOP;
+END;
+$permissions$;
 
 COMMENT ON TABLE public.topics IS
 'Topic ranking and generated labels. Draft schema for issue #26.';

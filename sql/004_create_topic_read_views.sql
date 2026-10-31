@@ -93,6 +93,24 @@ WHERE rank_in_topic <= 3;
 REVOKE ALL ON TABLE public.topic_overview FROM PUBLIC;
 REVOKE ALL ON TABLE public.topic_top_articles FROM PUBLIC;
 
+-- Remove automatic grants when Supabase roles exist.
+-- Final backend grants will be defined separately.
+DO $permissions$
+DECLARE
+    role_name text;
+BEGIN
+    FOR role_name IN
+        SELECT rolname
+        FROM pg_roles
+        WHERE rolname IN ('anon', 'authenticated', 'service_role')
+    LOOP
+        EXECUTE format(
+            'REVOKE ALL ON TABLE public.topic_overview, public.topic_top_articles FROM %I',
+            role_name
+        );
+    END LOOP;
+END;
+$permissions$;
 COMMENT ON VIEW public.topic_overview IS
 'Topic details and counts across all linked articles.
 Includes empty topics; the reader filters before limiting results.';

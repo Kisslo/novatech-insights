@@ -1,8 +1,44 @@
 # Topic Storage Verification
 
-Date: 2026-10-28
-Status: Partial local verification for issue #26.
-No migration has been applied to Supabase.
+Last updated: 2026-10-31
+Status: Partial verification for issue #26 and draft PR #39.
+Migrations 002–004 have not been applied to Supabase.
+
+## Current verification status
+
+Both GitHub CI jobs passed on commit e9ba74f:
+
+- Ruff and pytest.
+- PostgreSQL migrations and topic counts.
+
+The database CI job applies migrations 001–004 to an empty
+test database and runs the count, relationship and selection tests.
+
+The actual topic_overview and topic_top_articles views also
+passed the count and selection tests locally.
+
+Verified behavior:
+
+- Counts include all linked articles and distinct stored sources.
+- At most one article per source is displayed.
+- At most three articles per topic are displayed.
+- Articles with descriptions are preferred.
+- Whitespace-only descriptions are treated as empty.
+- Newer publication dates are preferred after description presence.
+- Smaller news_id values break ties within a source.
+- Empty topics appear in topic_overview with zero counts.
+- Empty topics have no rows in topic_top_articles.
+- Duplicate memberships and missing references are rejected.
+- Linked articles and topics cannot be deleted.
+
+Local count and selection test rows were rolled back.
+
+Backend permissions, Supabase compatibility, existing-data
+preservation and full-workflow integration still require testing.
+
+The dated sections below describe earlier verification stages.
+Their pending-work statements and example-query results are
+historical; this section records the current status.
 
 ## Test environment
 

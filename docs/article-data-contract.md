@@ -19,8 +19,15 @@ The target workflow is:
 7. Generate topic labels and relevance explanations.
 
 public.news already exists in Supabase.
-The embedding migration has only been tested locally.
-Topic storage, relationships and the read interface remain pending.
+Draft migrations 002–004 implement embedding storage, topics,
+article-topic relationships and the two read views.
+
+The views and their count and article-selection tests passed
+locally. Both GitHub CI jobs passed on commit e9ba74f.
+These migrations have not been applied to Supabase.
+
+Backend permissions, deployment compatibility and full-workflow
+integration still require verification.
 
 An article can belong to several topics.
 Do not use news.topic_id as the membership relationship.
@@ -144,7 +151,11 @@ For example, article 101 may link to topics 5 and 8.
 The pair (101, 5) must not be stored twice.
 
 Reject references to missing articles or topics.
-Agree deletion and regrouping behavior before implementation.
+The draft implementation uses ON DELETE RESTRICT for both
+foreign keys. Linked articles and topics cannot be deleted.
+This behavior is tested; team review and regrouping rules
+remain pending.
+
 
 Whether to store similarity remains open.
 Its meaning, scale and update rules must be agreed if included.
@@ -153,69 +164,92 @@ Do not store rank_in_topic.
 
 ## Ranked-topic read interface
 
-The final query, view or function name and result structure
-must be agreed with Nedal.
+The draft read interface is implemented in
+sql/004_create_topic_read_views.sql.
 
-Required topic fields:
+### public.topic_overview
+
+Returns one row per topic with:
 
 - id
+- label
+- why_relevant_sv
+- llm_relevance
 - score
-- source_count
 - article_count
+- source_count
 
-Required selected-article fields:
+Counts include all articles linked to the topic, before selecting
+the displayed articles. No publication-date filter is applied
+inside this view.
 
-- news_id, exposed from news.id
+Empty topics remain visible with zero counts. The reader must
+filter article_count > 0 before selecting the top topics.
+
+### public.topic_top_articles
+
+Returns up to three articles per topic with:
+
+- topic_id
+- rank_in_topic
+- news_id
 - title
 - source
 - link
 - description
 
-Read original metadata, including published when needed, from news.
-Preserve news_id throughout downstream processing.
+Original article metadata and news.id are preserved.
+rank_in_topic is calculated when reading, not stored.
 
-Calculate these values when reading:
+### Article selection
 
-- article_count: distinct linked articles in the agreed topic scope.
-- source_count: distinct sources across those articles.
-- rank_in_topic: position under the agreed article-selection rule.
+The confirmed Week 44 rule is:
 
-Compute topic counts before limiting displayed articles.
-Do not store these three calculated values as separate columns.
+1. Prefer articles with a non-empty description.
+2. Keep the best article from each source.
+3. Prefer newer publication dates.
+4. Use smaller news_id values to break remaining ties.
+5. Return up to three articles per topic.
 
-An article may appear in several topics, but must appear and be
-counted at most once within each topic.
+The implementation treats whitespace-only descriptions as empty.
+This clarification should be recorded for team review.
 
-### Selection and ordering
+Both source selection and final article ranking use description
+presence, publication date descending and news_id ascending.
 
-Support a configurable topic limit.
-Top five means five topics, with up to three articles per topic.
+Sources are compared using their stored source values.
+No source-name normalization is performed by these views.
 
-The documented Week 44 target remains top 20 unless the team
-explicitly changes it.
+Readers must explicitly order selected articles by topic_id
+and rank_in_topic.
 
-Select topics before expanding their article rows.
-A joined-row limit must not reduce the intended number of topics.
+### Topic selection and counts
 
-The top-three article-selection rule, similarity use and
-deterministic tie-breaking remain open.
+The Week 44 target remains up to 20 topics.
+The reader controls the topic limit and explicit topic ordering.
 
-Topic eligibility, time windows, source identity and freshness
-must be consistent with the ranking implementation.
+Filter empty topics and select the ranked topics before expanding
+their article rows. Do not apply the topic limit to joined
+article rows.
 
-Use explicit ordering for both topics and selected articles.
+For example, a topic containing four articles from two sources
+displays two articles, one per source. Its counts remain:
 
-### Count example
+- article_count = 4
+- source_count = 2
 
-A topic contains 10 articles from 4 distinct sources.
-The interface displays only its top 3 articles.
+Topic ranking tie-breaking, eligibility and freshness rules
+still need alignment with the ranking implementation.
+Similarity is not stored or used by these views.
 
-The topic still reports:
+### Permissions
 
-- article_count = 10
-- source_count = 4
+Both views use security_invoker = true.
+Readers need the appropriate view and underlying table permissions.
+Underlying row-security rules apply to the reader.
 
-These counts describe the full agreed topic scope.
+Full-topic counts require access to all relevant linked rows.
+Backend grants and permission tests remain pending.
 
 ## Article identity and duplicates
 
@@ -333,18 +367,31 @@ Verification must cover:
 Local test results do not establish production deployment.
 Test against the intended deployment versions before rollout.
 
-## Remaining decisions
+## Remaining decisions and checks
 
-- Final table names and topic ID type.
-- Topic field types, defaults and nullability.
-- Embedding metadata and regeneration rules.
-- Topic identity, deletion and regrouping behavior.
-- Similarity storage and top-three article selection.
-- Final read-interface name and output structure.
-- Eligibility, time windows and source identity.
+The two read views and the confirmed Week 44 article-selection
+rule are implemented and tested in draft PR #39.
+
+The following items remain:
+
+- Team review of the implemented table names, field types,
+  defaults and nullability.
+- Confirmation of the integer-only llm_relevance contract.
+- Embedding metadata, missing-description handling and
+  regeneration rules.
+- Topic identity and regrouping behavior.
+- Review of ON DELETE RESTRICT for linked articles and topics.
+- Whether similarity should be stored and used in future.
+- Team review of whitespace-only descriptions being treated
+  as empty.
+- Topic ranking tie-breaking, eligibility and time windows.
+- Source identity and normalization rules.
 - Scoring and labelling freshness and failure behavior.
-- Backend permissions and deployment procedure.
+- Backend permissions and tests of unauthorized access.
+- Supabase compatibility and preservation of existing data.
+- Integration with grouping, ranking and the Content reader.
+- Migration review, deployment responsibility and procedure.
 
 Issue #26 remains open until implementation and verification
-are complete. Keep PR #39 in draft while these requirements
-are being implemented and reviewed.
+are complete. PR #39 remains Draft.
+Migrations 002–004 have not been applied to Supabase.

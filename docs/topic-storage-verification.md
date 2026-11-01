@@ -86,6 +86,26 @@ and production integration remain unverified.
 
 No migrations were applied to Supabase during these checks.
 
+## pgvector 0.8.2 verification - 2026-11-01
+
+Migrations 001–004 and all five SQL test scripts passed locally
+using pgvector/pgvector:0.8.2-pg17 with simulated Supabase
+default grants.
+
+Verified versions:
+- PostgreSQL 17.10
+- pgvector 0.8.2
+
+Passing tests cover default permissions, topic counts,
+relationships, article selection and reader row security.
+
+This verifies the tested behavior with pgvector 0.8.2.
+The inspected Supabase server uses PostgreSQL 17.11, so this
+is not an exact match of the full Supabase environment.
+
+No migrations were applied to Supabase. Final backend grants
+and full-workflow integration remain pending.
+
 ## Test environment
 
 - Container: novatech-topic-test

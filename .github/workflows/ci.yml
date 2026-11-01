@@ -40,13 +40,20 @@ jobs:
         run: uv run --locked python -m pytest
 
   sql-tests:
-    name: PostgreSQL migrations and topic counts
+    name: PostgreSQL tests (${{ matrix.pgvector_tag }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    strategy:
+      fail-fast: false
+      matrix:
+        pgvector_tag:
+          - "0.8.2-pg17"
+          - "pg17"
+
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: pgvector/pgvector:${{ matrix.pgvector_tag }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ci-test-only

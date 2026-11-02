@@ -251,6 +251,25 @@ Underlying row-security rules apply to the reader.
 Full-topic counts require access to all relevant linked rows.
 Backend grants and permission tests remain pending.
 
+### Ranking access requirements — confirmed 2026-11-02
+
+Ranking plans to use the Supabase API with SUPABASE_URL and
+SUPABASE_KEY. Its owner confirmed that the secret key uses
+service_role.
+
+Required permissions:
+
+- SELECT on public.news, public.topic_articles and public.topics.
+- UPDATE on only these public.topics columns:
+  score, score_calculated_at, score_version and score_breakdown.
+- No INSERT or DELETE permissions are required for ranking.
+
+The ranking connection is not implemented yet.
+Grouping and content-reader requirements await confirmation.
+
+Programs using the same service_role share its permissions;
+these grants do not isolate ranking from other backend programs.
+
 ## Article identity and duplicates
 
 Use news.id as the shared article identifier.

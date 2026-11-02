@@ -55,10 +55,7 @@ def fetch_articles():
             f"?select=id,title,link,source,published,description"
             f"&published=gte.{quote(cutoff_string, safe='')}"
             f"&order=id.asc&limit={FETCH_PAGE_SIZE}&offset={offset}",
-            headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-            },
+            headers={"apikey": SUPABASE_KEY},
             method="GET",
         )
 

@@ -25,7 +25,7 @@ def test_normalize_url_removes_tracking_parameters():
 
 
 def test_normalize_url_removes_trailing_slash():
-    assert normalize_url("https://example.com/news/") == ("https://example.com/news")
+    assert normalize_url("https://example.com/news/") == "https://example.com/news"
 
 
 def test_normalize_title_ignores_case_and_extra_spaces():
@@ -268,10 +268,12 @@ def test_fetch_articles_filters_articles_to_last_seven_days(monkeypatch):
 
     def fake_urlopen(request, timeout):
         captured_url["url"] = request.full_url
+        assert request.get_header("Apikey") == "sb_secret_test123"
+        assert not request.has_header("Authorization")
         return FakeResponse()
 
     monkeypatch.setattr(group_news, "SUPABASE_URL", "https://example.supabase.co")
-    monkeypatch.setattr(group_news, "SUPABASE_KEY", "test-key")
+    monkeypatch.setattr(group_news, "SUPABASE_KEY", "sb_secret_test123")
     monkeypatch.setattr(group_news, "urlopen", fake_urlopen)
 
     before = datetime.now(timezone.utc)

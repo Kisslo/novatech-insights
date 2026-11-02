@@ -452,6 +452,25 @@ def test_supabase_reads_topics_then_their_top_three_articles(
     assert requests[0].get_header("Apikey") == "test-key"
 
 
+def test_supabase_sends_secret_key_only_in_apikey_header(supabase_env, monkeypatch):
+    monkeypatch.setenv("SUPABASE_KEY", "sb_secret_test123")
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen",
+        fake_urlopen(
+            {"topic_overview": OVERVIEW_ROWS, "topic_top_articles": ARTICLE_ROWS},
+            requests,
+        ),
+    )
+
+    load_supabase(top=3)
+
+    assert len(requests) == 2
+    for request in requests:
+        assert request.get_header("Apikey") == "sb_secret_test123"
+        assert not request.has_header("Authorization")
+
+
 def test_supabase_view_names_come_from_environment(supabase_env, monkeypatch):
     monkeypatch.setenv("TOPICS_OVERVIEW_VIEW", "ranked_topics")
     monkeypatch.setenv("TOPICS_ARTICLES_VIEW", "ranked_articles")

@@ -180,7 +180,7 @@ def supabase_get(base_url: str, key: str, view: str, params: dict) -> list[dict]
     query = urlencode(params, safe="(),.")
     request = Request(
         f"{base_url.rstrip('/')}/rest/v1/{view}?{query}",
-        headers={"apikey": key, "Authorization": f"Bearer {key}"},
+        headers={"apikey": key},
     )
     try:
         with urlopen(request, timeout=SUPABASE_TIMEOUT_SECONDS) as response:

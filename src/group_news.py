@@ -1,8 +1,10 @@
+import argparse
 import json
 import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
@@ -434,7 +436,80 @@ def print_groups(groups):
         print("-" * 80)
 
 
+def save_group(group):
+    """Save one complete group and return its database topic ID."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise ValueError("SUPABASE_URL or SUPABASE_KEY is missing.")
+
+    articles = group.get("articles")
+    if not isinstance(articles, list) or not articles:
+        raise ValueError("A group must contain articles.")
+
+    article_ids = []
+    for article in articles:
+        if not isinstance(article, dict):
+            raise ValueError("Each article must be an object.")
+
+        news_id = article.get("id")
+        if type(news_id) is not int or not 0 < news_id <= 9223372036854775807:
+            raise ValueError("Each article needs a valid database ID.")
+
+        article_ids.append(news_id)
+
+    article_ids = sorted(set(article_ids))
+    if len(article_ids) < 2:
+        raise ValueError("A group needs at least two distinct articles.")
+
+    request = Request(
+        f"{SUPABASE_URL}/rest/v1/rpc/save_topic_group",
+        data=json.dumps({"p_news_ids": article_ids}).encode("utf-8"),
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=60) as response:
+            topic_id = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        raise RuntimeError(
+            f"Saving group failed: HTTP {error.code}. "
+            "Check the database function and backend permissions. "
+            "Earlier groups may already be saved."
+        ) from None
+    except URLError, TimeoutError, OSError:
+        raise RuntimeError(
+            "Connection interrupted while saving. "
+            "The group may already be saved. "
+            "Retrying the same article IDs reuses the existing topic."
+        ) from None
+    except ValueError, UnicodeError:
+        raise RuntimeError(
+            "Unexpected response while saving. The group may already be saved."
+        ) from None
+
+    if type(topic_id) is not int or topic_id <= 0:
+        raise RuntimeError(
+            "The database did not return a valid topic ID. "
+            "The group may already be saved."
+        )
+
+    return topic_id
+
+
 def main():
+    parser = argparse.ArgumentParser(
+        description="Group news articles and optionally save the groups."
+    )
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Save all groups to Supabase using save_topic_group.",
+    )
+    args = parser.parse_args()
+
     articles = fetch_articles()
     print(f"\nArtiklar hämtade från databasen: {len(articles)}")
 
@@ -467,6 +542,23 @@ def main():
 
     print(f"\nAntal grupper med minst två källor: {len(groups)}")
     print_groups(groups)
+
+    if not args.save:
+        print("\nRead-only run. No groups saved.")
+        print("Use --save to save groups when deployment and permissions are ready.")
+        return
+
+    for number, group in enumerate(groups, start=1):
+        try:
+            topic_id = save_group(group)
+        except (ValueError, RuntimeError) as error:
+            raise SystemExit(
+                f"Stopped at group {number}/{len(groups)}: {error}"
+            ) from None
+
+        print(f"Group {number}/{len(groups)} saved or reused: topic_id={topic_id}")
+
+    print(f"\nFinished saving {len(groups)} groups.")
 
 
 if __name__ == "__main__":

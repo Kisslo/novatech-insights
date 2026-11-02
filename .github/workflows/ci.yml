@@ -125,6 +125,7 @@ jobs:
           docker exec -i "$TEST_CONTAINER" \
             psql -X -U postgres -d novatech_test \
             -v ON_ERROR_STOP=1 < sql/test_topic_permissions.sql
+
       - name: Run topic saving assertions
         env:
           TEST_CONTAINER: ${{ job.services.postgres.id }}
@@ -133,6 +134,13 @@ jobs:
             psql -X -U postgres -d novatech_test \
             -v ON_ERROR_STOP=1 < sql/test_save_topic_group.sql
 
+      - name: Run backend permission assertions
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$TEST_CONTAINER" \
+            psql -X -U postgres -d novatech_test \
+            -v ON_ERROR_STOP=1 < sql/test_topic_backend_permissions.sql
 
       - name: Verify migrations with Supabase-style default grants
         env:
@@ -163,7 +171,8 @@ jobs:
             sql/test_topic_constraints.sql \
             sql/test_topic_selection.sql \
             sql/test_topic_permissions.sql \
-            sql/test_save_topic_group.sql
+            sql/test_save_topic_group.sql \
+            sql/test_topic_backend_permissions.sql
           do
             docker exec -i "$TEST_CONTAINER" \
               psql -X -U postgres -d novatech_permissions_test \

@@ -4,7 +4,7 @@
 
 BEGIN;
 
-CREATE FUNCTION public.save_topic_group(p_news_ids bigint[])
+CREATE OR REPLACE FUNCTION public.save_topic_group(p_news_ids bigint[])
 RETURNS bigint
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -42,10 +42,10 @@ BEGIN
         RAISE EXCEPTION 'A group needs at least two distinct articles';
     END IF;
 
-    -- Serialize writes while checking and saving memberships.
-    -- Ordinary SELECT queries can still run.
-    LOCK TABLE public.topics, public.topic_articles
-        IN SHARE ROW EXCLUSIVE MODE;
+    -- Serialize calls to this function until the transaction ends.
+    -- Group membership writers must use this function.
+    -- These numbers identify the application's group-saving lock.
+    PERFORM pg_catalog.pg_advisory_xact_lock(260039, 1);
 
     -- Reuse an existing topic with exactly these article IDs.
     SELECT membership.topic_id

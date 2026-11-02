@@ -411,6 +411,11 @@ uv run --locked python -m pytest
 uv run --locked ruff check .
 ```
 
+## Topic Ranking
+
+For details on how topic scores are calculated, see
+[Topic ranking](docs/topic_ranking.md).
+
 ## Supabase News Storage
 
 Validate the collected CSV without changing local or remote data:

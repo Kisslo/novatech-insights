@@ -1,0 +1,97 @@
+
+{
+  "events": [
+    {
+      "id": "php2shell_patches",
+      "titles": [
+        "PHP2Shell: Critical PHP vulnerabilities patched, update now!",
+        "New Serious PHP Vulnerabilities Released and Patched",
+        "PHP ships emergency patches for critical PHP2Shell flaws",
+        "PHP Issues Emergency Patches for Two Critical PHP2Shell RCE Flaws as Exploit Attempts Emerge"
+      ]
+    },
+    {
+      "id": "php2shell_exploitation",
+      "titles": [
+        "PHP2Shell attacks began four days before patches, Amazon says, as attempts hit millions",
+        "Amazon says PHP2Shell exploitation began 4 days before patches",
+        "Hackers pile on PHP2Shell as AWS reveals attacks began before disclosure"
+      ]
+    },
+    {
+      "id": "legora_funding",
+      "titles": [
+        "Legal AI startup Legora raises $550M Series E at $8.8B valuation",
+        "Legal AI startup Legora raises $550M at $8.8B to change the face of the law",
+        "Legora’s valuation leaps to $8.8BN as raises $550M"
+      ]
+    },
+    {
+      "id": "emudhra_compromise",
+      "titles": [
+        "eMudhra Intermediate CA Compromise",
+        "eMudhra security blunder left trusted CA signing keys exposed to anyone",
+        "Eight eMudhra CA Keys Compromised, Triggering Emergency Fixes Across Browsers and Software"
+      ]
+    },
+    {
+      "id": "capcom_breach",
+      "titles": [
+        "Capcom data breach exposes 11.7 million account records",
+        "11 Million Impacted by Capcom Data Breach",
+        "Capcom confirms data breach affecting 11.7 million accounts"
+      ]
+    },
+    {
+      "id": "airbnb_chores",
+      "titles": [
+        "Airbnb sätter stopp – värdar får inte längre tvinga gäster att städa som personalen",
+        "Airbnb limits chores for guests, sparking backlash from hosts",
+        "Airbnb bans hosts from making you do the dishes"
+      ]
+    },
+    {
+      "id": "deepseek_ban",
+      "titles": [
+        "China Defends DeepSeek After US Ban of Its AI From Government Systems",
+        "US bans use of China's DeepSeek by government agencies",
+        "Trump administration orders ban on DeepSeek in federal agencies"
+      ]
+    },
+    {
+      "id": "flapping_airplanes_funding",
+      "titles": [
+        "Year-old AI research lab Flapping Airplanes raises $1B at a reported $6B valuation",
+        "Year-old AI lab Flapping Airplanes raises $1B at a $6B valuation"
+      ]
+    },
+    {
+      "id": "oura_ultrahuman_lawsuit",
+      "titles": [
+        "Oura sues Ultrahuman (again) to block its latest smart ring from the US market",
+        "Oura sues rival Ultrahuman again, threatening its U.S. smart ring comeback"
+      ]
+    },
+    {
+      "id": "minimax_model",
+      "titles": [
+        "China’s MiniMax Says Its New AI Model Cuts Agent Costs by 70%",
+        "MiniMax launches M3.1 Flash model, says it cuts AI agent costs by 70%"
+      ]
+    },
+    {
+      "id": "palo_alto_vulnerability",
+      "titles": [
+        "Palo Alto Networks Patches PAN-OS Authenticated RCE Flaw Amid Active Exploitation",
+        "Palo Alto Networks warns of PAN-OS RCE flaw exploited in attacks"
+      ]
+    },
+    {
+      "id": "siemens_vulnerability",
+      "titles": [
+        "ClickFix Attackers Exploit Siemens Software Center Flaw to Deploy Remote Access Trojan",
+        "Siemens Software Center Vulnerability Exploited in ClickFix Malware Attacks"
+      ]
+    }
+  ]
+}

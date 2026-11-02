@@ -447,6 +447,66 @@ articles are not automatically deleted when they become older.
 If an upload fails, earlier batches may already be saved.
 Rerunning the command skips existing links.
 
+
+## Semantic News Grouping
+
+The project includes two scripts for semantic news analysis:
+
+- `src/embed_news.py` finds similar news articles using multilingual
+  sentence embeddings.
+- `src/group_news.py` groups related articles into news events using
+  cosine similarity and constrained complete-link clustering.
+
+### Requirements
+
+The scripts require the following environment variables in `.env`:
+
+- `SUPABASE_URL`: The Supabase project URL.
+- `SUPABASE_KEY`: The Supabase backend API key.
+
+See the Environment Configuration section for setup instructions.
+Never commit real credentials.
+
+The scripts use the multilingual Sentence Transformers model:
+
+`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+
+The model is approximately 470 MB and is downloaded automatically
+from Hugging Face the first time either script is run. An internet
+connection is required for the initial download. Subsequent runs
+reuse the locally cached model.
+
+### Generate article embeddings and find similar articles
+
+Run from the repository root:
+
+```powershell
+uv run python src/embed_news.py
+```
+
+The script retrieves articles from Supabase, generates embeddings,
+and identifies the most similar article pairs from different sources.
+
+### Group related news articles
+
+Run from the repository root:
+
+```powershell
+uv run python src/group_news.py
+```
+
+The grouping script:
+
+- Retrieves articles published within the last seven days.
+- Excludes articles without a publication date through the database
+  date filter.
+- Removes duplicate article URLs.
+- Groups semantically similar articles from different sources.
+- Requires articles in a group to meet the similarity threshold.
+- Limits the publication date spread within each group to seven days.
+
+The scripts do not modify the original news records in Supabase.
+
 ## Topic Summaries
 
 `src/summarize_topic.py` creates one Swedish topic summary from articles
@@ -464,3 +524,37 @@ all options.
 
 Summaries are stored temporarily as Markdown files in `output/summaries/`,
 which is ignored by Git. Database storage is planned in issue #5.
+
+## Topic Labels and Top-N List
+
+`src/label_topics.py` reads ranked topics with their best articles
+(max 3 per topic), asks Claude for a Swedish label, a short explanation
+of why the topic matters (`why_relevant_sv`) and a relevance rating from
+1 to 5 (`llm_relevance`), and writes a top-N list as Markdown (issue #27).
+
+```powershell
+uv run python src/label_topics.py --top 5 --dry-run
+uv run python src/label_topics.py --top 5
+uv run python src/label_topics.py --source supabase --top 20 --dry-run
+```
+
+- `--source fixture` (default) reads `tests/fixtures/sample_topics.json`.
+- `--source supabase` reads two views through the Supabase REST API.
+  Their names are set in `.env` with `TOPICS_OVERVIEW_VIEW`
+  (default `topic_overview`) and `TOPICS_ARTICLES_VIEW`
+  (default `topic_top_articles`). The views are part of issue #26.
+  Supabase is only read, never written.
+- `--top` sets the number of topics (default 20, e.g. 5 for Telegram).
+- `--dry-run` shows the prompts, a preview of the list and the estimated
+  cost without calling Claude. No API key is needed.
+
+A real run makes one Claude call per topic and needs `ANTHROPIC_API_KEY`
+in `.env`. It stops before any call if the estimated cost is above
+0.5 USD. A topic that fails is reported in the terminal and in the list,
+and the run continues with the next topic.
+
+The list is saved in `output/top<N>_<date>_<time>.md`, which is ignored
+by Git. Each topic shows its rank, label, score, number of sources and
+articles, AI relevance and up to three article links with their `news_id`.
+Labels are not yet written back to the `topics` table; that waits for
+team approval.

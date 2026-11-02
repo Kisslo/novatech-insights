@@ -1,9 +1,9 @@
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 import numpy as np
@@ -39,9 +39,12 @@ TRACKING_PARAMS = {
 
 
 def fetch_articles():
-    """Hämta artiklar från public.news utan att ändra databasen."""
+    """Hämta artiklar från public.news från de senaste sju dagarna."""
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise ValueError("SUPABASE_URL eller SUPABASE_KEY saknas i .env")
+
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=7)
+    cutoff_string = cutoff_date.isoformat()
 
     articles = []
     offset = 0
@@ -50,6 +53,7 @@ def fetch_articles():
         request = Request(
             f"{SUPABASE_URL}/rest/v1/news"
             f"?select=id,title,link,source,published,description"
+            f"&published=gte.{quote(cutoff_string, safe='')}"
             f"&order=id.asc&limit={FETCH_PAGE_SIZE}&offset={offset}",
             headers={
                 "apikey": SUPABASE_KEY,

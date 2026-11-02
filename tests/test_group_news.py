@@ -1,5 +1,10 @@
+import json
+from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs, urlparse
+
 import numpy as np
 
+import src.group_news as group_news
 from src.group_news import (
     article_text,
     build_groups,
@@ -238,3 +243,49 @@ def test_build_groups_does_not_merge_identical_normalized_titles():
     groups = build_groups(articles, embeddings)
 
     assert groups == []
+
+
+def test_fetch_articles_filters_articles_to_last_seven_days(monkeypatch):
+    articles = [
+        {
+            "id": 1,
+            "title": "Recent AI article",
+            "published": "2026-11-01T12:00:00+00:00",
+        }
+    ]
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self):
+            return json.dumps(articles).encode("utf-8")
+
+    captured_url = {}
+
+    def fake_urlopen(request, timeout):
+        captured_url["url"] = request.full_url
+        return FakeResponse()
+
+    monkeypatch.setattr(group_news, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(group_news, "SUPABASE_KEY", "test-key")
+    monkeypatch.setattr(group_news, "urlopen", fake_urlopen)
+
+    before = datetime.now(timezone.utc)
+    result = group_news.fetch_articles()
+    after = datetime.now(timezone.utc)
+
+    query = parse_qs(urlparse(captured_url["url"]).query)
+    published_filter = query["published"][0]
+
+    assert published_filter.startswith("gte.")
+
+    cutoff = datetime.fromisoformat(published_filter.removeprefix("gte."))
+
+    assert before - timedelta(days=7) <= cutoff
+    assert cutoff <= after - timedelta(days=7)
+
+    assert result == articles

@@ -1,0 +1,40 @@
+﻿{
+  "description": "Manually reviewed article pairs from audit_groups.py. Labels are provisional and based on title and description review.",
+  "pairs": [
+    {
+      "group": 6,
+      "label": "different_events",
+      "reason": "Autonomous AI agents attacking company websites versus attackers abusing exposed AI models."
+    },
+    {
+      "group": 9,
+      "label": "different_events",
+      "reason": "Broad AI safety and financing news overview versus Q&A about catastrophic AI risk."
+    },
+    {
+      "group": 12,
+      "label": "different_events",
+      "reason": "Report about phishing targeting AI agents versus sponsored content about account takeover."
+    },
+    {
+      "group": 14,
+      "label": "different_events",
+      "reason": "Survey about AI-agent observability versus practical hallucination detection methods."
+    },
+    {
+      "group": 16,
+      "label": "same_event",
+      "reason": "Both articles describe the public launch and availability of the Wabi personal AI assistant."
+    },
+    {
+      "group": 17,
+      "label": "different_events",
+      "reason": "Consequences of AI-related hacks versus claims about AI-generated content degrading cyberattacks."
+    },
+    {
+      "group": 18,
+      "label": "different_events",
+      "reason": "Sponsored webinar about unmanaged AI-agent insider risk versus a general AI-agent security lifecycle article."
+    }
+  ]
+}

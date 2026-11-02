@@ -447,6 +447,66 @@ articles are not automatically deleted when they become older.
 If an upload fails, earlier batches may already be saved.
 Rerunning the command skips existing links.
 
+
+## Semantic News Grouping
+
+The project includes two scripts for semantic news analysis:
+
+- `src/embed_news.py` finds similar news articles using multilingual
+  sentence embeddings.
+- `src/group_news.py` groups related articles into news events using
+  cosine similarity and constrained complete-link clustering.
+
+### Requirements
+
+The scripts require the following environment variables in `.env`:
+
+- `SUPABASE_URL`: The Supabase project URL.
+- `SUPABASE_KEY`: The Supabase backend API key.
+
+See the Environment Configuration section for setup instructions.
+Never commit real credentials.
+
+The scripts use the multilingual Sentence Transformers model:
+
+`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+
+The model is approximately 470 MB and is downloaded automatically
+from Hugging Face the first time either script is run. An internet
+connection is required for the initial download. Subsequent runs
+reuse the locally cached model.
+
+### Generate article embeddings and find similar articles
+
+Run from the repository root:
+
+```powershell
+uv run python src/embed_news.py
+```
+
+The script retrieves articles from Supabase, generates embeddings,
+and identifies the most similar article pairs from different sources.
+
+### Group related news articles
+
+Run from the repository root:
+
+```powershell
+uv run python src/group_news.py
+```
+
+The grouping script:
+
+- Retrieves articles published within the last seven days.
+- Excludes articles without a publication date through the database
+  date filter.
+- Removes duplicate article URLs.
+- Groups semantically similar articles from different sources.
+- Requires articles in a group to meet the similarity threshold.
+- Limits the publication date spread within each group to seven days.
+
+The scripts do not modify the original news records in Supabase.
+
 ## Topic Summaries
 
 `src/summarize_topic.py` creates one Swedish topic summary from articles

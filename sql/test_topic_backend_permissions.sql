@@ -1,4 +1,6 @@
 -- Local/CI test only. Never run in Supabase.
+-- Apply migration 006 before running this test.
+-- Test records and temporary-table permissions are rolled back.
 \set ON_ERROR_STOP on
 
 BEGIN;
@@ -13,13 +15,6 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (
-        SELECT 1 FROM pg_roles WHERE rolname = 'service_role'
-    ) THEN
-        CREATE ROLE service_role
-            NOLOGIN NOSUPERUSER BYPASSRLS;
-    END IF;
-
-    IF NOT EXISTS (
         SELECT 1
         FROM pg_roles
         WHERE rolname = 'service_role'
@@ -31,46 +26,6 @@ BEGIN
     END IF;
 END;
 $setup$;
-
--- Reset direct grants on the new objects for this test.
-REVOKE ALL ON TABLE
-    public.topics,
-    public.topic_articles,
-    public.topic_overview,
-    public.topic_top_articles
-FROM service_role;
-
-REVOKE ALL ON SEQUENCE public.topics_id_seq FROM service_role;
-REVOKE ALL ON FUNCTION public.save_topic_group(bigint[])
-FROM service_role;
-
--- Proposed permissions shared by backend programs.
-GRANT USAGE ON SCHEMA public TO service_role;
-
-GRANT SELECT ON TABLE
-    public.news,
-    public.topics,
-    public.topic_articles,
-    public.topic_overview,
-    public.topic_top_articles
-TO service_role;
-
-GRANT INSERT ON TABLE
-    public.topics,
-    public.topic_articles
-TO service_role;
-
-GRANT UPDATE (
-    score,
-    score_calculated_at,
-    score_version,
-    score_breakdown
-) ON public.topics TO service_role;
-
-GRANT USAGE ON SEQUENCE public.topics_id_seq TO service_role;
-
-GRANT EXECUTE ON FUNCTION public.save_topic_group(bigint[])
-TO service_role;
 
 -- Create fixture articles as the test administrator.
 CREATE TEMP TABLE backend_test_articles (
@@ -97,6 +52,7 @@ WITH inserted AS (
 INSERT INTO backend_test_articles (news_id)
 SELECT id FROM inserted;
 
+-- This grant is only for reading the temporary test fixture.
 GRANT SELECT ON backend_test_articles TO service_role;
 
 -- All following assertions run as the backend role.
@@ -228,10 +184,11 @@ BEGIN
         RAISE EXCEPTION 'FAIL: backend can delete memberships';
     END IF;
 
-    -- No matching row: checks DELETE permission without triggering FKs.
+    -- Check DELETE permission without triggering foreign keys.
     blocked := false;
     BEGIN
-        DELETE FROM public.topics WHERE id = topic_id_saved AND false;
+        DELETE FROM public.topics
+        WHERE id = topic_id_saved AND false;
     EXCEPTION
         WHEN insufficient_privilege THEN
             blocked := true;

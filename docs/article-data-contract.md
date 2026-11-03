@@ -1,11 +1,13 @@
 # News and Topics Data Contract
 
 Last updated: 2026-11-03
+
 Status: Draft for team review under issue #26 and PR #39.
+
 Assessment and migration planning are recorded in PR #29.
 
-This document distinguishes implemented behavior from remaining
-team decisions. It does not apply database changes.
+This document distinguishes implemented behavior from remaining team
+decisions. It does not apply database changes.
 
 ## Scope and implementation status
 
@@ -25,7 +27,7 @@ Draft migrations 002–006 implement embedding storage, topics,
 article-topic relationships, two read views, a group-saving
 function and shared backend permissions.
 
-All three GitHub CI checks passed on commit 0eb4cee:
+All three GitHub CI checks passed on commit 7f1ff0f:
 
 - Ruff and pytest.
 - PostgreSQL tests (0.8.2-pg17).
@@ -33,7 +35,14 @@ All three GitHub CI checks passed on commit 0eb4cee:
 
 SQL tests cover topic counts, relationships, article selection,
 row security, group saving and actual backend grants.
+
 CI also tests with simulated Supabase default grants.
+
+Source-name comparison improvements were added in commit b57966f.
+The Python test formatting correction was added in commit 7f1ff0f.
+
+The source-name changes are a partial alignment, not a complete
+implementation of Python's Unicode normalization behavior.
 
 src/group_news.py reads articles and groups them locally.
 Saving requires the explicit --save option. Each group is
@@ -41,6 +50,7 @@ saved through public.save_topic_group(bigint[]) in a separate
 REST API request.
 
 Migrations 002–006 have not been applied to Supabase.
+
 Live REST API access, existing-data preservation and the
 complete workflow still require deployment verification.
 
@@ -69,15 +79,24 @@ database storage remain outside this PR's scope.
 - [Uploader](../src/store_news.py)
 - [Grouping and optional saving](../src/group_news.py)
 - [Topic labels and top-N reader](../src/label_topics.py)
-- [Issue #26](https://github.com/Kisslo/novatech-insights/issues/26): storage and read interface.
-- [PR #29](https://github.com/Kisslo/novatech-insights/pull/29): assessment and migration plan.
-- [PR #39](https://github.com/Kisslo/novatech-insights/pull/39): draft implementation.
-- [Issue #19](https://github.com/Kisslo/novatech-insights/issues/19): embeddings and grouping.
-- [Issue #35](https://github.com/Kisslo/novatech-insights/issues/35): ranking.
-- [Issue #27](https://github.com/Kisslo/novatech-insights/issues/27): labels and top-N output.
-- [Issue #36](https://github.com/Kisslo/novatech-insights/issues/36): integration verification.
-- [Issue #37](https://github.com/Kisslo/novatech-insights/issues/37): feedback.
-- [Issue #38](https://github.com/Kisslo/novatech-insights/issues/38): README updates.
+- [Issue #26](https://github.com/Kisslo/novatech-insights/issues/26):
+  storage and read interface.
+- [PR #29](https://github.com/Kisslo/novatech-insights/pull/29):
+  assessment and migration plan.
+- [PR #39](https://github.com/Kisslo/novatech-insights/pull/39):
+  draft implementation.
+- [Issue #19](https://github.com/Kisslo/novatech-insights/issues/19):
+  embeddings and grouping.
+- [Issue #35](https://github.com/Kisslo/novatech-insights/issues/35):
+  ranking.
+- [Issue #27](https://github.com/Kisslo/novatech-insights/issues/27):
+  labels and top-N output.
+- [Issue #36](https://github.com/Kisslo/novatech-insights/issues/36):
+  integration verification.
+- [Issue #37](https://github.com/Kisslo/novatech-insights/issues/37):
+  feedback.
+- [Issue #38](https://github.com/Kisslo/novatech-insights/issues/38):
+  README updates.
 
 ## Collected articles: public.news
 
@@ -97,6 +116,7 @@ Data owns original metadata and publisher RSS descriptions.
 
 The eight original columns are NOT NULL.
 subject and description default to empty strings.
+
 collected_at is database insertion time, not RSS retrieval time.
 
 Keep original metadata unchanged during grouping and ranking.
@@ -111,6 +131,7 @@ Turker confirmed:
 - Input: article title and RSS description.
 
 Migration 002 adds extensions.vector(384).
+
 NULL means no embedding is stored; it does not distinguish
 unprocessed articles from failed attempts.
 
@@ -160,6 +181,7 @@ Implemented constraints:
 - The four score fields must either all be NULL or all be non-NULL.
 
 Ranking owns the four score fields under #35.
+
 New topics created by save_topic_group start without scores or labels.
 
 Nedal's label reader under #27 currently writes generated labels,
@@ -234,12 +256,12 @@ the function creates a new topic.
 
 Existing topics and memberships are not automatically replaced,
 retired or deleted. Older and overlapping groups may remain.
-
 The team must agree how these groups should be handled.
 
 ### Atomicity and metadata
 
 A new topic and all its article links are saved in one transaction.
+
 A failed save leaves no partial topic or membership records
 from that call.
 
@@ -254,11 +276,16 @@ which articles belong together.
 ### Concurrent writers
 
 Calls use a transaction-level advisory lock.
+
 Membership writers must follow the same locking convention
 by using this function.
 
 Direct inserts can bypass that convention.
 Parallel-session concurrency has not yet been tested.
+
+Whether to restrict group writes to the function remains
+an open review decision. Function-only writes are not enforced
+by the current permissions.
 
 ### Python and REST API integration
 
@@ -275,8 +302,8 @@ The program uses SUPABASE_URL and SUPABASE_KEY.
 The secret key is sent only in the apikey header.
 
 Display limits do not limit the groups or memberships saved.
-Each group uses a separate request and transaction.
 
+Each group uses a separate request and transaction.
 If saving fails, the program stops processing later groups.
 Earlier groups may already be committed.
 
@@ -310,6 +337,10 @@ inside this view.
 Empty topics remain visible with zero counts.
 The reader filters article_count > 0 before selecting top topics.
 
+source_count counts distinct normalized, nonblank source names.
+NULL and blank source names do not contribute to source_count.
+They do not remove articles from article_count.
+
 ### public.topic_top_articles
 
 Returns up to three articles per topic with:
@@ -341,15 +372,66 @@ This clarification remains documented for team review.
 Both source selection and final article ranking use description
 presence, publication date descending and news_id ascending.
 
-Sources are compared using their stored source values.
-No source-name normalization is performed by these views.
+Both views compare source names using lower() after trimming
+surrounding ASCII whitespace:
+
+- Ordinary spaces.
+- Tabs.
+- Newlines.
+- Carriage returns.
+- Form feeds.
+- Vertical tabs.
+
+For example, "Source A", " source a " and a source name surrounded
+by tabs or newlines are treated as the same source.
+
+The comparison changes neither the stored source name nor the
+source value returned for display.
+
+NULL and blank source names share one article-selection bucket.
+The view may select one article from this bucket even though
+these values do not contribute to source_count.
 
 Readers must explicitly order selected articles by topic_id
 and rank_in_topic.
 
+### Source-normalization limitations
+
+The SQL changes partially align the views with Python.
+
+Grouping uses Python strip().casefold().
+The read views trim surrounding ASCII whitespace and use SQL lower().
+
+These operations are not fully equivalent.
+
+Python strip() also removes additional Unicode whitespace,
+including nonbreaking spaces.
+
+Python casefold() supports case mappings that SQL lower()
+does not necessarily reproduce. For example, Python treats
+"Straße" and "STRASSE" as the same source.
+
+SQL case conversion also depends on the database locale or collation.
+
+Current SQL tests verify source-name case differences and
+surrounding ASCII whitespace while preserving article-selection
+ordering and full-topic counts.
+
+A Python regression test verifies the existing behavior for:
+
+- Case differences and surrounding ordinary spaces.
+- Tabs and newlines.
+- Nonbreaking spaces.
+- Swedish letter case.
+- The casefold mapping between "Straße" and "STRASSE".
+
+The Python test does not establish matching SQL behavior for all
+those cases. Full Unicode alignment remains an open review point.
+
 ### Topic selection and counts
 
 The Week 44 target is up to 20 topics.
+
 The reader controls the topic limit and explicit topic ordering.
 
 The current label reader skips topics without scores and
@@ -358,8 +440,9 @@ topics without articles before applying its topic limit.
 Select the ranked topics before expanding their article rows.
 Do not apply the topic limit to joined article rows.
 
-For example, a topic containing four articles from two sources
-displays two articles, one per source. Its counts remain:
+For example, a topic containing four articles from two
+nonblank normalized sources displays two articles, one per source.
+Its counts remain:
 
 - article_count = 4
 - source_count = 2
@@ -372,9 +455,10 @@ Similarity is not stored or used by these views.
 ### View permissions and row security
 
 Both views use security_invoker = true.
-Readers need the appropriate view and underlying table permissions.
 
+Readers need the appropriate view and underlying table permissions.
 Row-security behavior depends on the reader's database role.
+
 Ordinary roles are subject to applicable RLS policies.
 The shared service_role bypasses RLS but still needs SQL grants.
 
@@ -382,6 +466,13 @@ Full-topic counts require access to all relevant linked rows.
 
 Local and CI tests verify view access, underlying table access
 and reader row-security behavior.
+
+Migration 004 uses CREATE OR REPLACE VIEW and revokes grants
+on the views. If rerun in a local test database, reapply
+migration 006 afterward to restore the backend view grants.
+
+This local testing procedure is not approval to rerun migrations
+against the shared Supabase environment.
 
 ## Backend access
 
@@ -430,6 +521,7 @@ for its current Markdown-output workflow.
 | Four ranking columns in public.topics | UPDATE |
 
 Migration 006 does not remove existing news permissions.
+
 It resets service_role grants on the new topic objects before
 applying the grants listed above.
 
@@ -438,6 +530,7 @@ No DELETE grant is provided for topics or memberships.
 
 The saving function uses SECURITY INVOKER.
 The caller therefore needs underlying INSERT permissions.
+
 Those table-level INSERT grants also permit direct inserts,
 including initial topic field values allowed by the constraints.
 They do not enforce function-only writes.
@@ -448,6 +541,7 @@ Ranking, grouping and the reader are not isolated from each other.
 Migrations 003–005 remove automatic grants from PUBLIC and
 existing anon, authenticated and service_role roles on the
 new topic objects. Migration 006 adds the backend grants.
+
 It does not add topic access for anon or authenticated.
 
 If service_role does not exist, migration 006 reports that
@@ -470,7 +564,8 @@ The test role is a non-superuser with BYPASSRLS.
 Test records are rolled back.
 Migration grants remain in the local test databases.
 
-These results do not establish live Supabase API access.
+These results do not establish live Supabase API access
+or resolve the review question about direct INSERT permissions.
 
 ## Article identity and duplicates
 
@@ -491,8 +586,10 @@ article's existing database ID.
 This local processing does not rewrite stored links, delete
 database duplicates or establish a new database-wide identity rule.
 
-Source identity also needs alignment: grouping compares normalized
-source names, while the read views compare stored source values.
+Grouping uses Python strip().casefold() for source comparisons.
+The read views trim surrounding ASCII whitespace and use SQL lower().
+Case and ASCII-whitespace examples are tested, but full Unicode
+alignment remains pending.
 
 CSV input has no database ID. Resolve it using the exact stored
 link and verify the resulting news.id.
@@ -525,6 +622,14 @@ the publication-date span within a group to seven days.
 These processing windows are not database retention policies.
 Stored articles and topics are not automatically deleted.
 The read views do not apply a publication-date window.
+
+The meeting discussion suggested retaining old topics and marking
+them inactive rather than deleting their history. This behavior
+is not implemented.
+
+A seven-day retirement period was suggested, but is not an
+agreed specification. The starting timestamp, filtering behavior
+and reactivation rules still need agreement.
 
 ## RSS descriptions and CSV exchange
 
@@ -570,6 +675,11 @@ Do not:
 - Invent missing publication dates.
 - Delete unmatched records without explicit approval.
 - Drop legacy tables through this draft implementation.
+- Rerun migration 001 against the existing production news table.
+- Run setup_supabase_permission_test.sql in the real Supabase project.
+
+setup_supabase_permission_test.sql creates simulated roles and
+default grants for local and CI testing only.
 
 PR #29 records assessment and migration planning.
 PR #39 contains the draft implementation and verification.
@@ -581,6 +691,7 @@ deployment secrets. Never commit them or expose them in frontend code.
 
 RLS is enabled on news and on the new topics and topic_articles
 tables. Backend SQL grants are defined in migration 006.
+
 A view does not automatically provide appropriate access control.
 
 Local and CI verification covers:
@@ -590,11 +701,15 @@ Local and CI verification covers:
 - Rejection of duplicate pairs and invalid references.
 - Correct counts before article display limits.
 - Article selection and ordering.
+- Tested source-name case and ASCII-whitespace differences.
 - Exact-set group reuse and preservation of topic metadata.
 - Rollback of failed group saves.
 - Reader row-security behavior.
 - Actual backend permissions and denied operations.
 - Python request construction and simulated API failures.
+
+The grouping test file contains 20 passing tests after adding
+the source-name regression test and preserving all original tests.
 
 Remaining integration verification includes:
 
@@ -624,7 +739,7 @@ The following items remain:
 - Whether similarity should be stored and used in future.
 - Team review of whitespace-only descriptions being treated as empty.
 - Topic ranking tie-breaking, eligibility and time windows.
-- Source identity and normalization rules.
+- Full alignment of source identity and Unicode normalization rules.
 - Scoring and labelling freshness and failure behavior.
 - Review of shared service_role grants and direct INSERT access.
 - Parallel-session testing of concurrent group saves.
@@ -632,7 +747,13 @@ The following items remain:
 - Live integration with grouping, ranking and the Content reader.
 - Usage documentation and PR description updates.
 - Migration review, deployment responsibility and procedure.
+- Agreement on which checks block merge and which belong to deployment
+  or separate follow-up tasks.
+
+The review points remain open until the team agrees on their
+resolution or explicitly accepts them as follow-up work.
 
 Issue #26 remains open until its agreed scope and verification
 are complete. PR #39 remains Draft.
+
 Migrations 002–006 have not been applied to Supabase.

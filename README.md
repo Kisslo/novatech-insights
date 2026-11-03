@@ -1,4 +1,3 @@
-
 # Novatech Insights
 
 A system for collecting relevant news and developing it into content
@@ -51,6 +50,7 @@ perspective.
 Week 1 is allocated to establishing the project foundation.
 
 Proposed scope:
+
 - Prepare the shared repository and project documentation.
 - Establish a common foundation for local development
   and configuration.
@@ -91,41 +91,51 @@ publish content.
 
 ## Status
 
-The project is in its initial setup phase. The architecture,
-shared development environment, and deployment approach have
-not yet been finalized.
+News collection, CSV classification, Supabase news uploading,
+semantic grouping, topic summaries and topic-label output have
+implementations in the repository.
 
-n8n has been mentioned as a possible automation tool but has
-not been confirmed as a technology choice.
+Draft PR #39 adds topic storage, read views, optional group saving
+and shared backend permissions. Local and CI tests cover these
+changes, but migrations 002–006 have not been applied to Supabase.
+
+Live grouping-to-ranking-to-reader integration and deployment
+verification remain pending.
+
+See [the data contract](docs/article-data-contract.md) and
+[verification results](docs/topic-storage-verification.md)
+for the current implementation scope and limitations.
 
 ## Proposed Initial Grouping Test
 
-An initial test has been proposed in which news items are
-grouped based on their titles.
+The initial proposal grouped news items based on their titles.
 
-Proposed core fields:
+Its proposed core fields were:
+
 - title
 - link
 - source
 - publication_date
 
-Kisslo has also identified topic or genre as relevant information.
-Its representation and assignment need to be defined.
+The implemented article contract uses `published` for the
+publication timestamp. Semantic grouping now uses article titles
+and RSS descriptions.
 
-Title-based grouping is a test proposal, not a decision about
-the system's final analysis method.
+The initial title-only proposal is historical context, not the
+current grouping implementation.
 
 ## Open Questions
 
 - Selection of tools, services, and integrations.
-- Storage and handling of news data and generated content.
-- Data formats and interfaces between components.
+- Storage and handling of generated content.
 - Documentation of priority search phrases and services.
-- Definition and assignment of topics or genres.
+- Topic identity, regrouping and retirement of older groups.
 - Processes and authority for review, approval, and publication.
 - Definition of the results metrics owned by the Data area.
-- Shared Python version and dependency management.
 - Target environment for deployment and ongoing maintenance.
+
+See [the data contract](docs/article-data-contract.md) for
+remaining storage and interface decisions.
 
 ## Code Quality
 
@@ -147,14 +157,18 @@ uv run ruff format .
 
 ### Tests
 
-Run the tests from the repository root:
+Run the Python tests from the repository root:
 
 ```bash
 uv run python -m pytest
 ```
 
-The tests cover date parsing, date formatting, and RSS description
-cleaning. They do not make network requests or connect to a database.
+The tests cover collection, storage request handling, grouping,
+summaries, topic labels and optional group saving. API interactions
+are tested using fake responses rather than live credentials.
+
+Separate SQL tests in `sql/` exercise migrations, constraints,
+read views, group saving and database permissions in PostgreSQL.
 
 ### Continuous Integration
 
@@ -174,6 +188,18 @@ You can run the same commands locally from the repository root.
 The linting and formatting checks do not modify files.
 A failed check or test causes CI to fail.
 
+The database jobs use these container image tags:
+
+- `pgvector/pgvector:0.8.2-pg17`
+- `pgvector/pgvector:pg17`
+
+They test migrations and SQL assertions in an empty database and
+a separate database with simulated Supabase default grants.
+Automatic-grant removal is checked before migration 006 applies
+the backend grants. Backend tests then verify those actual grants.
+
+These tests do not connect to or modify the team's Supabase project.
+
 To fix formatting locally, run:
 
 ```bash
@@ -189,7 +215,7 @@ Install uv before following these steps.
 From the repository root, create or synchronize the local environment:
 
 ```bash
-uv sync --locked
+uv sync --locked --dev
 ```
 
 This command creates `.venv` if needed and installs dependencies
@@ -226,7 +252,7 @@ only safe placeholders and documentation.
 
 ### Dependencies
 
-Declare runtime dependencies in `pyproject.toml` usiNo conng:
+Declare runtime dependencies in `pyproject.toml` using:
 
 ```bash
 uv add <package>
@@ -272,7 +298,8 @@ to import project code such as `src.collect_news`.
 - Use Conventional Commits, for example:
   `docs: update development instructions`.
 
-Branch protection has been requested and is pending configuration.
+Follow the repository's current branch protection and review
+requirements when merging.
 
 ### Tests in Pull Requests
 
@@ -309,13 +336,14 @@ in the pull request description.
 ### Reviewing and Merging
 
 The reviewer should check that:
+
 - The changes match the purpose and scope of the pull request.
 - Relevant tests are included and CI checks pass.
 - Documentation matches the proposed changes.
 - No credentials or other sensitive information are included.
 
 If everything looks good and CI checks pass, approve and merge
-the pull request.
+the pull request in accordance with the repository's review requirements.
 
 If changes are needed, comment on the relevant lines in the
 Files changed tab and submit the review with Request changes.
@@ -335,7 +363,8 @@ uv run python src/collect_news.py
 ```
 
 Sources are configured in `data/sources.csv`.
-Results are saved to `data/news.csv` is local and ignored by Git. Run the collector to create or update it.
+Results are saved to `data/news.csv`, which is local and ignored by Git.
+Run the collector to create or update it.
 
 - Supports RSS feeds with `channel/item` elements.
 - Prevents duplicates by checking the exact article link.
@@ -352,9 +381,8 @@ the time window.
 
 Output columns: `title`, `link`, `source`, `published`, `subject`, `description`.
 
-The current collector uses `published` for the publication date;
-the proposed grouping fields above call it `publication_date`.
-The shared field name still needs to be agreed.
+The shared article contract uses `published` for the publication date.
+See [the data contract](docs/article-data-contract.md).
 
 The `subject` field is currently left blank for new articles.
 The collector saves the RSS feed's `description` as plain text,
@@ -372,6 +400,9 @@ shorten them or fetch article pages.
 
 The topic classifier assigns news articles to topic categories using
 the keywords defined in `src/group_topics.py`.
+
+These legacy `subject` categories are separate from semantic
+topic membership in `public.topic_articles`.
 
 ### Run the classifier
 
@@ -426,6 +457,7 @@ uv run python src/store_news.py --upload
 ```
 
 The uploader:
+
 - Reads `data/news.csv`.
 - Requires title, link, source, and a valid publication timestamp.
 - Accepts only timezone-aware dates within the last seven days.
@@ -438,15 +470,15 @@ The uploader:
 
 The database generates `id` and `collected_at`.
 A unique constraint on `link` prevents duplicate articles.
-Row Level Security is enabled. The backend secret key bypasses RLS
-and must never be included in frontend code or committed to Git.
+Row Level Security is enabled. The backend secret key uses
+`service_role`, which bypasses RLS but still requires SQL grants.
+The key must never be included in frontend code or committed to Git.
 
 The seven-day filter applies to upload input. Previously uploaded
 articles are not automatically deleted when they become older.
 
 If an upload fails, earlier batches may already be saved.
 Rerunning the command skips existing links.
-
 
 ## Semantic News Grouping
 
@@ -495,17 +527,65 @@ Run from the repository root:
 uv run python src/group_news.py
 ```
 
+By default, this reads articles and displays groups without
+writing to the database.
+
 The grouping script:
 
-- Retrieves articles published within the last seven days.
+- Retrieves articles using a seven-day publication-date cutoff.
 - Excludes articles without a publication date through the database
   date filter.
-- Removes duplicate article URLs.
+- Deduplicates articles locally while preserving their database IDs.
 - Groups semantically similar articles from different sources.
 - Requires articles in a group to meet the similarity threshold.
-- Limits the publication date spread within each group to seven days.
+- Limits the publication-date spread within each group to seven days.
 
-The scripts do not modify the original news records in Supabase.
+### Save groups to the database
+
+Saving requires the explicit `--save` option:
+
+```powershell
+uv run python src/group_news.py --save
+```
+
+Before using this option, the target database must have migrations
+002–006 applied in order and the required backend permissions.
+The existing `public.news` table must already be present.
+
+These migrations have not yet been applied to the team's Supabase
+project. Live REST API saving remains to be verified.
+
+The command uses `SUPABASE_URL` and `SUPABASE_KEY` from `.env`.
+Check that they identify the intended database before saving.
+
+For each group, the script calls `public.save_topic_group(bigint[])`
+through the Supabase REST API:
+
+- Saves a topic and all its article links together.
+- Reuses an existing topic with exactly the same article-ID set.
+- Preserves existing labels and ranking fields when reusing a topic.
+- Creates a new topic when no exact article-ID set matches.
+- Saves all groups and their full memberships, regardless of
+  terminal display limits.
+
+Each group is saved in a separate transaction. If a later save
+fails, earlier groups may already be committed. The script stops
+processing subsequent groups.
+
+A connection failure may leave the current request's outcome
+uncertain. Retrying the same article-ID set reuses a topic that
+was successfully saved.
+
+Older or overlapping topics are not automatically replaced or
+deleted. Their lifecycle still requires team agreement.
+
+Grouping and saving do not modify original news records.
+The save operation does not store embeddings or generate scores
+or labels.
+
+See [the data contract](docs/article-data-contract.md) and
+[verification results](docs/topic-storage-verification.md)
+for permissions, tested behavior and remaining limitations.
 
 ## Topic Summaries
 
@@ -543,10 +623,13 @@ uv run python src/label_topics.py --source supabase --top 20 --dry-run
   Their names are set in `.env` with `TOPICS_OVERVIEW_VIEW`
   (default `topic_overview`) and `TOPICS_ARTICLES_VIEW`
   (default `topic_top_articles`). The views are part of issue #26.
-  Supabase is only read, never written.
+  This script only reads Supabase; it does not write to it.
 - `--top` sets the number of topics (default 20, e.g. 5 for Telegram).
 - `--dry-run` shows the prompts, a preview of the list and the estimated
-  cost without calling Claude. No API key is needed.
+  cost without calling Claude. It does not need `ANTHROPIC_API_KEY`.
+  With `--source fixture`, no API credentials are needed.
+  With `--source supabase`, `SUPABASE_URL` and `SUPABASE_KEY` are
+  still required to read the database.
 
 A real run makes one Claude call per topic and needs `ANTHROPIC_API_KEY`
 in `.env`. It stops before any call if the estimated cost is above

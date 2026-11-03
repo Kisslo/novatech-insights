@@ -1,12 +1,13 @@
 -- Draft migration for issue #26.
 -- Local testing only until reviewed.
 -- Whitespace-only descriptions are treated as empty.
--- Sources are compared using their stored values.
--- Backend grants and permission tests remain pending.
+-- Source comparisons ignore case and surrounding ASCII whitespace.
+-- Full alignment with Python Unicode casefold/strip remains pending.
+-- Backend grants are applied separately by migration 006.
 
 BEGIN;
 
-CREATE VIEW public.topic_overview
+CREATE OR REPLACE VIEW public.topic_overview
 WITH (security_invoker = true)
 AS
 SELECT
@@ -16,7 +17,12 @@ SELECT
     t.llm_relevance,
     t.score,
     COUNT(n.id) AS article_count,
-    COUNT(DISTINCT n.source) AS source_count
+    COUNT(
+        DISTINCT NULLIF(
+            lower(btrim(n.source, E' \t\n\r\f\013')),
+            ''
+        )
+    ) AS source_count
 FROM public.topics AS t
 LEFT JOIN public.topic_articles AS ta
     ON ta.topic_id = t.id
@@ -29,7 +35,7 @@ GROUP BY
     t.llm_relevance,
     t.score;
 
-CREATE VIEW public.topic_top_articles
+CREATE OR REPLACE VIEW public.topic_top_articles
 WITH (security_invoker = true)
 AS
 WITH candidates AS (
@@ -53,7 +59,12 @@ ranked_per_source AS (
     SELECT
         candidates.*,
         ROW_NUMBER() OVER (
-            PARTITION BY topic_id, source
+            PARTITION BY
+                topic_id,
+                NULLIF(
+                    lower(btrim(source, E' \t\n\r\f\013')),
+                    ''
+                )
             ORDER BY
                 has_description DESC,
                 published DESC NULLS LAST,
@@ -94,7 +105,8 @@ REVOKE ALL ON TABLE public.topic_overview FROM PUBLIC;
 REVOKE ALL ON TABLE public.topic_top_articles FROM PUBLIC;
 
 -- Remove automatic grants when Supabase roles exist.
--- Final backend grants will be defined separately.
+-- Reapply migration 006 after rerunning this migration locally.
+
 DO $permissions$
 DECLARE
     role_name text;
@@ -111,12 +123,18 @@ BEGIN
     END LOOP;
 END;
 $permissions$;
+
 COMMENT ON VIEW public.topic_overview IS
 'Topic details and counts across all linked articles.
-Includes empty topics; the reader filters before limiting results.';
+Includes empty topics; the reader filters before limiting results.
+Source counts ignore case and surrounding ASCII whitespace.
+NULL and blank source names are excluded from source counts.';
 
 COMMENT ON VIEW public.topic_top_articles IS
-'Up to three articles per topic, at most one per stored source.
+'Up to three articles per topic, at most one per normalized source.
+Source comparisons ignore case and surrounding ASCII whitespace.
+NULL and blank sources share one selection bucket.
+Original source names are preserved for display.
 Prefer descriptions, then newer dates, then smaller news IDs.
 Readers must order by topic_id and rank_in_topic.';
 

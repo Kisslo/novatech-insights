@@ -291,3 +291,31 @@ def test_fetch_articles_filters_articles_to_last_seven_days(monkeypatch):
     assert cutoff <= after - timedelta(days=7)
 
     assert result == articles
+
+
+def test_build_groups_treats_source_name_variants_as_one_source():
+    source_pairs = [
+        ("Source A", " source a "),
+        ("Source A", "\tSOURCE A\n"),
+        ("Source A", "\u00a0source a\u00a0"),
+        ("K\u00e4lla", "K\u00c4LLA"),
+        ("Stra\u00dfe", "STRASSE"),
+    ]
+
+    embeddings = np.array(
+        [
+            [1.0, 0.0],
+            [0.9, np.sqrt(1 - 0.9**2)],
+        ]
+    )
+
+    for first_source, second_source in source_pairs:
+        articles = [
+            make_article("AI model released", first_source),
+            make_article("New AI model launched", second_source),
+        ]
+
+        assert build_groups(articles, embeddings) == [], (
+            f"Source variants counted separately: "
+            f"{first_source!r}, {second_source!r}"
+        )

@@ -34,7 +34,7 @@ WITH inserted AS (
         (
             'A newer but empty',
             'https://example.com/selection-a-empty',
-            'Source A', '2026-10-31 12:00:00+00', ''
+             E'\tsource a\n' , '2026-10-31 12:00:00+00', ''
         ),
         (
             'B with description',
@@ -57,7 +57,7 @@ WITH inserted AS (
         (
             'C tied article two',
             'https://example.com/selection-c-two',
-            'Source C', '2026-10-29 12:00:00+00',
+            'SOURCE C', '2026-10-29 12:00:00+00',
             'Useful description'
         ),
         (

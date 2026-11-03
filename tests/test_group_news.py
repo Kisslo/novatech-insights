@@ -316,6 +316,5 @@ def test_build_groups_treats_source_name_variants_as_one_source():
         ]
 
         assert build_groups(articles, embeddings) == [], (
-            f"Source variants counted separately: "
-            f"{first_source!r}, {second_source!r}"
+            f"Source variants counted separately: {first_source!r}, {second_source!r}"
         )

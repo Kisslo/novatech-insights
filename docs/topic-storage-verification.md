@@ -1,44 +1,141 @@
 # Topic Storage Verification
 
-Last updated: 2026-10-31
-Status: Partial verification for issue #26 and draft PR #39.
-Migrations 002–004 have not been applied to Supabase.
+Last updated: 2026-11-03
+Status: Local and CI verification for issue #26 and draft PR #39.
+Migrations 002–006 have not been applied to Supabase.
 
 ## Current verification status
 
-Both GitHub CI jobs passed on commit e9ba74f:
+All three GitHub CI checks passed on commit 0eb4cee:
 
 - Ruff and pytest.
-- PostgreSQL migrations and topic counts.
+- PostgreSQL tests (0.8.2-pg17).
+- PostgreSQL tests (pg17).
 
-The database CI job applies migrations 001–004 to an empty
-test database and runs the count, relationship and selection tests.
+CI tests migrations 001–005 in an empty PostgreSQL database
+and a separate database with simulated Supabase default grants.
+It checks that automatic grants are removed before applying
+migration 006, then verifies actual backend permissions in
+both databases.
 
-The actual topic_overview and topic_top_articles views also
-passed the count and selection tests locally.
+These checks do not establish deployment or full-workflow
+integration in Supabase.
 
-Verified behavior:
+## Verified storage and read behavior
 
-- Counts include all linked articles and distinct stored sources.
-- At most one article per source is displayed.
-- At most three articles per topic are displayed.
-- Articles with descriptions are preferred.
-- Whitespace-only descriptions are treated as empty.
-- Newer publication dates are preferred after description presence.
-- Smaller news_id values break ties within a source.
-- Empty topics appear in topic_overview with zero counts.
+- Topic counts include all linked articles and distinct stored sources.
+- Article selection returns at most three articles per topic,
+  with at most one article per source.
+- Articles with descriptions are preferred; whitespace-only
+  descriptions are treated as empty.
+- Publication date descending and news_id ascending determine
+  the remaining article order.
+- Empty topics remain visible in topic_overview with zero counts.
 - Empty topics have no rows in topic_top_articles.
 - Duplicate memberships and missing references are rejected.
-- Linked articles and topics cannot be deleted.
+- Foreign keys prevent deletion of linked articles and topics.
+- Reader permissions and row-security policies affect view results.
 
-Local count and selection test rows were rolled back.
+## Group saving
 
-Backend permissions, Supabase compatibility, existing-data
-preservation and full-workflow integration still require testing.
+Migration 005 defines public.save_topic_group(bigint[]).
 
-The dated sections below describe earlier verification stages.
-Their pending-work statements and example-query results are
-historical; this section records the current status.
+Verified locally and in CI:
+
+- A topic and all its article links are saved together.
+- Saving the same article-ID set reuses the existing topic.
+- Reordering or repeating input IDs does not create another topic.
+- Reusing a topic preserves its existing label and score fields.
+- A missing article reference causes the save to fail without
+  leaving a partial topic or membership records.
+
+Calls use a transaction-level advisory lock. Membership writers
+must use this function for the locking convention to work.
+Concurrent saves have not been tested with parallel sessions.
+
+A changed article-ID set creates a new topic. Existing topics
+are not retired, replaced or deleted automatically. The team
+must agree how older and overlapping groups should be handled.
+
+## Python integration
+
+src/group_news.py remains read-only unless --save is supplied.
+With --save, it sends each full group to the database function
+through the Supabase REST API.
+
+The display limits do not limit the groups or memberships saved.
+Each group is saved in a separate request. If a later group
+fails, earlier groups may already be committed.
+
+Python tests use fake responses and verify:
+
+- The request includes all distinct article IDs.
+- The secret key is sent only in the apikey header.
+- Invalid article IDs are rejected before sending a request.
+- HTTP errors, connection failures and invalid responses are handled.
+- Saving requires the explicit --save option.
+- A saving failure stops processing subsequent groups.
+
+These tests do not verify a live REST API connection.
+
+## Backend permissions
+
+Migration 006 defines permissions for the shared service_role:
+
+- SELECT on news, topics, topic_articles and both read views.
+- INSERT on topics and topic_articles.
+- USAGE on topics_id_seq.
+- EXECUTE on save_topic_group(bigint[]).
+- UPDATE on score, score_calculated_at, score_version and
+  score_breakdown in topics.
+
+The migration preserves existing news permissions and adds
+SELECT access. It does not restrict other existing news grants.
+
+The backend test uses the actual migration grants with a
+non-superuser service_role that bypasses RLS.
+
+Verified locally and in CI:
+
+- The backend reads news and saves or reuses complete groups.
+- It updates the four ranking fields.
+- It reads both views and their full topic counts.
+- Updating existing labels is denied.
+- Updating memberships is denied.
+- Deleting topics or memberships is denied.
+
+All programs using service_role share these permissions.
+They are not isolated from one another. Direct INSERT access
+is available because the saving function uses SECURITY INVOKER;
+using the function is an application convention.
+
+Migration 006 skips its grants if service_role does not exist.
+CI creates that role before applying and testing the grants.
+
+Test records are rolled back. Grants applied by migration 006
+remain in the local test databases.
+
+## Remaining review and deployment work
+
+- Review the schema, saving behavior and shared backend permissions.
+- Agree how changed, overlapping and old groups are handled.
+- Confirm embedding metadata, update and regeneration requirements.
+- Align topic eligibility, freshness and source identity rules.
+- Update the data contract and usage documentation.
+- Confirm deployment responsibility and migration order.
+- Verify compatibility and existing-data preservation in the
+  intended Supabase environment.
+- Test actual REST API access and the complete
+  grouping-to-ranking-to-reader workflow.
+
+PR #39 remains Draft. Passing CI does not mean issue #26 is
+fully complete or that the database changes are deployed.
+
+## Historical verification notes
+
+The sections below record earlier stages. Their statements
+about pending implementation and tests describe those dates,
+not the current status above.
 
 ## Permission verification - 2026-10-31
 

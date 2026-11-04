@@ -56,11 +56,11 @@ daily_average = previous_count / previous_days
 velocity = recent_count / max(daily_average, 1)
 ```
 
-With `previous_days = 7`, the counting windows are:
+With `previous_days = 6`, the counting windows are:
 
 ```text
 recent:   now - 1 day < published <= now
-previous: now - 8 days < published <= now - 1 day
+previous: now - 7 days < published <= now - 1 day
 ```
 
 The denominator is at least `1`. When the previous daily average is below `1`, velocity equals the number of articles in the latest day.
@@ -131,7 +131,7 @@ With the default bonus maxima, breadth and velocity each add up to 100% of artic
 |---|---:|---|
 | `half_life_days` | `3` | Half-life used by article contributions and source breadth |
 | `default_weight` | `1.0` | Source weight for sources without a configured match |
-| `previous_days` | `7` | Velocity comparison period before the latest day |
+| `previous_days` | `6` | Velocity comparison period before the latest day |
 | `max_breadth_bonus` | `1.0` | Maximum additional breadth factor |
 | `breadth_scale` | `3.0` | Weighted source breadth giving half the maximum breadth factor |
 | `max_velocity_bonus` | `1.0` | Maximum additional velocity factor |

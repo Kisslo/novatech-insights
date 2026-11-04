@@ -155,8 +155,8 @@ def test_calculate_velocity(recent_count, previous_count, previous_days, expecte
     assert result == pytest.approx(expected)
 
 
-def test_calculate_velocity_defaults_to_seven_days():
-    assert calculate_velocity(6, 14) == pytest.approx(3.0)
+def test_calculate_velocity_defaults_to_six_days():
+    assert calculate_velocity(6, 14) == pytest.approx(18 / 7)
 
 
 @pytest.mark.parametrize(("recent_count", "previous_count"), [(-1, 14), (3, -1)])
@@ -178,6 +178,7 @@ def test_calculate_velocity_rejects_invalid_previous_days(previous_days):
         ("2026-11-01T12:00:00Z", (1, 0)),
         ("2026-10-31T12:00:00Z", (0, 1)),
         ("2026-10-28T12:00:00Z", (0, 1)),
+        ("2026-10-25T12:00:01Z", (0, 1)),
         ("2026-10-24T12:00:00Z", (0, 0)),
         ("2026-10-23T12:00:00Z", (0, 0)),
     ],
@@ -244,10 +245,10 @@ def test_calculate_topic_velocity_returns_score_and_counts(now):
         {"id": i, "published": "2026-10-28T12:00:00Z"} for i in range(7, 21)
     ]
     result = calculate_topic_velocity(articles, now)
-    assert result["velocity"] == pytest.approx(3.0)
+    assert result["velocity"] == pytest.approx(18 / 7)
     assert result["recent_count"] == 6
     assert result["previous_count"] == 14
-    assert result["previous_days"] == 7
+    assert result["previous_days"] == 6
 
 
 def test_calculate_topic_velocity_without_history(now):
@@ -267,7 +268,7 @@ def test_calculate_topic_velocity_empty_input(now):
         "velocity": 0.0,
         "recent_count": 0,
         "previous_count": 0,
-        "previous_days": 7,
+        "previous_days": 6,
     }
 
 
@@ -468,7 +469,7 @@ def test_calculate_topic_metrics_combines_components(now, sample_articles):
     assert result["velocity"] == pytest.approx(1.0)
     assert result["recent_count"] == 1
     assert result["previous_count"] == 1
-    assert result["previous_days"] == 7
+    assert result["previous_days"] == 6
     assert [item["news_id"] for item in result["contributions"]] == [1, 2]
 
 

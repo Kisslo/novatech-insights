@@ -70,7 +70,7 @@ def calculate_time_decay(age_days, half_life_days):
     return 0.5 ** (age_days / half_life_days)
 
 
-def calculate_velocity(recent_count, previous_count, previous_days=7):
+def calculate_velocity(recent_count, previous_count, previous_days=6):
     if recent_count < 0 or previous_count < 0:
         raise ValueError("article counts must not be negative")
     if previous_days <= 0:
@@ -79,7 +79,7 @@ def calculate_velocity(recent_count, previous_count, previous_days=7):
     return recent_count / max(daily_average, 1)
 
 
-def count_velocity_articles(articles, now, previous_days=7):
+def count_velocity_articles(articles, now, previous_days=6):
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must include a timezone")
     if previous_days <= 0:
@@ -102,7 +102,7 @@ def count_velocity_articles(articles, now, previous_days=7):
     return (recent_count, previous_count)
 
 
-def calculate_topic_velocity(articles, now, previous_days=7):
+def calculate_topic_velocity(articles, now, previous_days=6):
     recent_count, previous_count = count_velocity_articles(articles, now, previous_days)
     velocity = calculate_velocity(recent_count, previous_count, previous_days)
     return {
@@ -183,7 +183,7 @@ def calculate_topic_metrics(
     swedish_sources,
     half_life_days=3,
     default_weight=1.0,
-    previous_days=7,
+    previous_days=6,
 ):
     unique_articles = {}
     for article in articles:
@@ -339,7 +339,7 @@ def calculate_topic_ranking(
     score_version="preliminary-v2",
     half_life_days=3,
     default_weight=1.0,
-    previous_days=7,
+    previous_days=6,
 ):
     metrics = calculate_topic_metrics(
         articles,
@@ -385,7 +385,7 @@ def rank_topics(
     score_version="preliminary-v2",
     half_life_days=3,
     default_weight=1.0,
-    previous_days=7,
+    previous_days=6,
     top_n=None,
 ):
     if top_n is not None:

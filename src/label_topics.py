@@ -11,10 +11,15 @@ Sources:
         id, score, article_count, source_count
     TOPICS_ARTICLES_VIEW (default topic_top_articles):
         topic_id, news_id, title, source, link, description, rank_in_topic
-    Topics without articles are left out, then topics are limited to --top
-        before their articles are read, and only articles with rank_in_topic 1-3
-        are read. The top-3 rule itself is decided in the view. Only the read
-        functions depend on the schema (#26). Supabase is only read, never written.
+    Topics without articles are left out, then --top plus FETCH_EXTRA topics
+        are read, and only articles with rank_in_topic 1-3. The top-3 rule
+        itself is decided in the view. Only the read functions depend on the
+        schema (#26). Supabase is only read, never written.
+
+Invalid topics (for example an article without title, source or link) are
+skipped and reported, and the run continues (agreed with Mathias, #42).
+With Supabase a few extra topics are read, so skipped topics do not make the
+list shorter than --top when enough valid topics exist.
 
 The list is saved in output/top<N>_<date>_<time>.md.
 
@@ -75,6 +80,7 @@ DEFAULT_OVERVIEW_VIEW = "topic_overview"
 DEFAULT_ARTICLES_VIEW = "topic_top_articles"
 VIEW_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 SUPABASE_TIMEOUT_SECONDS = 30
+FETCH_EXTRA = 10  # extra topics read from Supabase to replace skipped ones
 
 SYSTEM_PROMPT = """You are an editor for Novatech Solutions, a Swedish IT company.
 Novatech writes in Swedish about AI, automation and regulation for small
@@ -152,15 +158,37 @@ def has_articles(raw: dict) -> bool:
     return bool(raw.get("articles"))
 
 
-def load_fixture(path: Path) -> list[dict]:
+def normalize_topics(
+    raw_topics: list[dict], limit: int | None = None
+) -> tuple[list[dict], list[dict]]:
+    """Normalize topics in order. An invalid topic is skipped, not fatal.
+
+    Stops when `limit` valid topics are found (None = no limit), so topics
+    after the limit are neither read nor reported.
+    Returns (valid topics, skipped topics as {"topic_id", "reason"}).
+    """
+    topics, skipped = [], []
+    for raw in raw_topics:
+        if limit is not None and len(topics) >= limit:
+            break
+        try:
+            topics.append(normalize_topic(raw))
+        except (ValueError, TypeError) as error:
+            # TypeError: e.g. score is null and float(None) fails
+            skipped.append({"topic_id": raw.get("id"), "reason": str(error)})
+    return topics, skipped
+
+
+def load_fixture(path: Path) -> tuple[list[dict], list[dict]]:
     """Read topics from a JSON file with the same fields as the read interface.
 
     Topics without articles are left out before --top is applied, the same
     way as the article_count=gt.0 filter in load_supabase.
+    Returns (valid topics, skipped topics).
     """
     with path.open(encoding="utf-8") as f:
         data = json.load(f)
-    return [normalize_topic(topic) for topic in data["topics"] if has_articles(topic)]
+    return normalize_topics([t for t in data["topics"] if has_articles(t)])
 
 
 class ReadError(Exception):
@@ -206,10 +234,12 @@ def supabase_get(base_url: str, key: str, view: str, params: dict) -> list[dict]
     return rows
 
 
-def load_supabase(top: int) -> list[dict]:
+def load_supabase(top: int) -> tuple[list[dict], list[dict]]:
     """Read the top ranked topics and their best 3 articles from Supabase.
 
-    Topics without articles are reported and left out of the list.
+    Reads top + FETCH_EXTRA topics, skips topics without articles or with an
+    invalid article, and cuts the result to `top` after the filtering.
+    Returns (valid topics, skipped topics as {"topic_id", "reason"}).
     """
     base_url = os.getenv("SUPABASE_URL", "").strip()
     key = os.getenv("SUPABASE_KEY", "").strip()
@@ -219,7 +249,8 @@ def load_supabase(top: int) -> list[dict]:
     articles_view = view_name("TOPICS_ARTICLES_VIEW", DEFAULT_ARTICLES_VIEW)
 
     # Choose the topics first, so the article rows cannot reduce the topic count.
-    # Topics without articles are left out before the --top limit (agreed in #29).
+    # Topics without articles are left out before the limit (agreed in #29).
+    # A few extra are read to replace topics that are skipped below (#42).
     topic_rows = supabase_get(
         base_url,
         key,
@@ -229,11 +260,11 @@ def load_supabase(top: int) -> list[dict]:
             "score": "not.is.null",
             "article_count": "gt.0",
             "order": "score.desc,id.asc",
-            "limit": str(top),
+            "limit": str(top + FETCH_EXTRA),
         },
     )
     if not topic_rows:
-        return []
+        return [], []
 
     ids = ",".join(str(row["id"]) for row in topic_rows)
     article_rows = supabase_get(
@@ -251,14 +282,12 @@ def load_supabase(top: int) -> list[dict]:
     for row in article_rows:
         by_topic.setdefault(row["topic_id"], []).append(row)
 
-    topics = []
-    for row in topic_rows:
-        articles = by_topic.get(row["id"], [])
-        if not articles:
-            print(f"Skipped topic {row['id']}: no articles in '{articles_view}'.")
-            continue
-        topics.append(normalize_topic({**row, "articles": articles}))
-    return topics
+    # Rows are already sorted by score; a topic without article rows is
+    # skipped by normalize_topic ("has no articles").
+    raw_topics = [
+        {**row, "articles": by_topic.get(row["id"], [])} for row in topic_rows
+    ]
+    return normalize_topics(raw_topics, limit=top)
 
 
 def select_top(topics: list[dict], top: int) -> list[dict]:
@@ -372,14 +401,17 @@ def render_markdown(
     top: int,
     source: str,
     errors: dict | None = None,
+    skipped: list[dict] | None = None,
 ) -> str:
     """Write the top list as Markdown.
 
     labels maps topic id -> {"label", "why_relevant_sv", "llm_relevance"}.
     errors maps topic id -> error message for topics that failed.
+    skipped lists topics left out because of invalid data.
     Topics without labels get placeholders (used by --dry-run).
     """
     errors = errors or {}
+    skipped = skipped or []
     today = datetime.now().astimezone()
     lines = [
         f"# Topp {top} ämnen – {today:%Y-%m-%d}",
@@ -414,6 +446,9 @@ def render_markdown(
             )
     if errors:
         lines += ["", f'Misslyckade ämnen: {len(errors)} (se "Fel" ovan)']
+    if skipped:
+        lines += ["", f"Överhoppade ämnen (ogiltig data): {len(skipped)}"]
+        lines += [f"- Ämne-id {s['topic_id']}: {s['reason']}" for s in skipped]
     return "\n".join(lines) + "\n"
 
 
@@ -464,9 +499,9 @@ def main() -> None:
 
     try:
         if args.source == "supabase":
-            topics = load_supabase(args.top)
+            topics, skipped = load_supabase(args.top)
         elif args.fixture.exists():
-            topics = load_fixture(args.fixture)
+            topics, skipped = load_fixture(args.fixture)
         else:
             sys.exit(f"Fixture not found: {args.fixture}")
     except ReadError as error:
@@ -474,6 +509,8 @@ def main() -> None:
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
         sys.exit(f"Could not read topics: {error}")
 
+    for item in skipped:
+        print(f"Skipped topic {item['topic_id']}: {item['reason']}")
     selected = select_top(topics, args.top)
     if not selected:
         sys.exit("No topics found.")
@@ -498,7 +535,7 @@ def main() -> None:
             print(f"Warning: above the limit of ${MAX_COST_USD:.2f} per run.")
         print("Dry run: no call to Claude made.\n")
         print("--- Preview of the list ---\n")
-        print(render_markdown(selected, {}, args.top, args.source))
+        print(render_markdown(selected, {}, args.top, args.source, skipped=skipped))
         return
 
     if cost is None or cost > MAX_COST_USD:
@@ -518,7 +555,7 @@ def main() -> None:
     if errors:
         print(f"Failed topics: {sorted(errors)} (marked in the list)")
 
-    text = render_markdown(selected, labels, args.top, args.source, errors)
+    text = render_markdown(selected, labels, args.top, args.source, errors, skipped)
     path = save_list(text, args.top, model, real_cost)
     print("\n" + text)
     print(f"Saved to: {path}")

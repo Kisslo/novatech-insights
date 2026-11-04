@@ -651,7 +651,6 @@ by Git. Each topic shows its rank, label, score, number of sources and
 articles, AI relevance and up to three article links with their `news_id`.
 
 `--save` needs UPDATE permission on `topics.label`, `why_relevant_sv` and
-`--save` needs UPDATE permission on `topics.label`, `why_relevant_sv` and
 `llm_relevance` for the backend key (granted in `sql/006_topic_backend_permissions.sql`).
 
 ## Telegram API

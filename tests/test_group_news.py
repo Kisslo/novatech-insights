@@ -25,7 +25,7 @@ def test_normalize_url_removes_tracking_parameters():
 
 
 def test_normalize_url_removes_trailing_slash():
-    assert normalize_url("https://example.com/news/") == ("https://example.com/news")
+    assert normalize_url("https://example.com/news/") == "https://example.com/news"
 
 
 def test_normalize_title_ignores_case_and_extra_spaces():
@@ -268,10 +268,12 @@ def test_fetch_articles_filters_articles_to_last_seven_days(monkeypatch):
 
     def fake_urlopen(request, timeout):
         captured_url["url"] = request.full_url
+        assert request.get_header("Apikey") == "sb_secret_test123"
+        assert not request.has_header("Authorization")
         return FakeResponse()
 
     monkeypatch.setattr(group_news, "SUPABASE_URL", "https://example.supabase.co")
-    monkeypatch.setattr(group_news, "SUPABASE_KEY", "test-key")
+    monkeypatch.setattr(group_news, "SUPABASE_KEY", "sb_secret_test123")
     monkeypatch.setattr(group_news, "urlopen", fake_urlopen)
 
     before = datetime.now(timezone.utc)
@@ -289,3 +291,50 @@ def test_fetch_articles_filters_articles_to_last_seven_days(monkeypatch):
     assert cutoff <= after - timedelta(days=7)
 
     assert result == articles
+
+
+def test_build_groups_treats_source_name_variants_as_one_source():
+    source_pairs = [
+        ("Source A", " source a "),
+        ("Source A", "\tSOURCE A\n"),
+        ("Source A", "\u00a0source a\u00a0"),
+        ("K\u00e4lla", "K\u00c4LLA"),
+        ("Stra\u00dfe", "STRASSE"),
+    ]
+
+    embeddings = np.array(
+        [
+            [1.0, 0.0],
+            [0.9, np.sqrt(1 - 0.9**2)],
+        ]
+    )
+
+    for first_source, second_source in source_pairs:
+        articles = [
+            make_article("AI model released", first_source),
+            make_article("New AI model launched", second_source),
+        ]
+
+        assert build_groups(articles, embeddings) == [], (
+            f"Source variants counted separately: {first_source!r}, {second_source!r}"
+        )
+
+
+def test_normalize_source_handles_case_unicode_and_whitespace():
+    from src.source_normalization import normalize_source
+
+    cases = [
+        ("Reuters", "reuters"),
+        ("reuters", "reuters"),
+        ("Straße", "strasse"),
+        ("STRASSE", "strasse"),
+        ("\u00a0Reuters\u00a0", "reuters"),
+        ("\tSOURCE A\n", "source a"),
+        ("KÄLLA", "källa"),
+        ("", ""),
+        (" \t\n", ""),
+        (None, ""),
+    ]
+
+    for source, expected in cases:
+        assert normalize_source(source) == expected

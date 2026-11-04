@@ -9,6 +9,11 @@ from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
+if __package__:
+    from .source_normalization import normalize_source
+else:
+    from source_normalization import normalize_source
+
 ROOT = Path(__file__).resolve().parent.parent
 CSV_FILE = ROOT / "data" / "news.csv"
 
@@ -58,6 +63,7 @@ def load_articles():
                 .isoformat(timespec="seconds")
                 .replace("+00:00", "Z")
             )
+            article["source_normalized"] = normalize_source(article["source"])
             articles[article["link"]] = article
 
     print(f"Valid unique articles: {len(articles)}")

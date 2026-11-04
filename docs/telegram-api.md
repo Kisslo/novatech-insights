@@ -130,8 +130,7 @@ the demo the API is exposed through ngrok. Cloud hosting is decided later
 by the team.
 
 The ngrok free plan includes one fixed dev domain
-(`<name>.ngrok-free.app`) that stays the same after a restart, so n8n can
-keep the same URL. Limits on the free plan (checked 4 Nov 2026 in
+(`<name>.ngrok-free.dev` or `.ngrok-free.app`; use exactly the address on the `Forwarding` line) that stays the same after a restart, so n8n can keep the same URL. Limits on the free plan (checked 4 Nov 2026 in
 [ngrok's documentation](https://ngrok.com/docs/pricing-limits/free-plan-limits)):
 20,000 HTTP requests and 1 GB data out per month. Check ngrok's terms
 before using the free plan beyond development and the demo.
@@ -146,7 +145,7 @@ Stop it (Ctrl+C) when it is not needed.
 
 ## Settings in n8n
 
-- **HTTP Request node:** `GET https://<name>.ngrok-free.app/telegram/top?n=5`
+- **HTTP Request node:** `GET https://<name>.ngrok-free.dev/telegram/top?n=5`
   with headers `X-API-Key: <key>` (store it as an n8n credential, not in the
   workflow) and `ngrok-skip-browser-warning: 1`. ngrok shows a warning page
   to browsers on the free plan; according to its documentation this does not

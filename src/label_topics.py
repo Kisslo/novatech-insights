@@ -260,11 +260,15 @@ def supabase_get(base_url: str, key: str, view: str, params: dict) -> list[dict]
     return rows
 
 
-def load_supabase(top: int) -> tuple[list[dict], list[dict]]:
+def load_supabase(
+    top: int, labelled_only: bool = False
+) -> tuple[list[dict], list[dict]]:
     """Read the top ranked topics and their best 3 articles from Supabase.
 
     Reads top + FETCH_EXTRA topics, skips topics without articles or with an
     invalid article, and cuts the result to `top` after the filtering.
+    labelled_only=True reads only topics that have a label (used by the
+    Telegram API, which never calls Claude).
     Returns (valid topics, skipped topics as {"topic_id", "reason"}).
     """
     base_url = os.getenv("SUPABASE_URL", "").strip()
@@ -277,19 +281,17 @@ def load_supabase(top: int) -> tuple[list[dict], list[dict]]:
     # Choose the topics first, so the article rows cannot reduce the topic count.
     # Topics without articles are left out before the limit (agreed in #29).
     # A few extra are read to replace topics that are skipped below (#42).
-    topic_rows = supabase_get(
-        base_url,
-        key,
-        overview,
-        {
-            "select": "id,score,article_count,source_count,"
-            "label,why_relevant_sv,llm_relevance",
-            "score": "not.is.null",
-            "article_count": "gt.0",
-            "order": "score.desc,id.asc",
-            "limit": str(top + FETCH_EXTRA),
-        },
-    )
+    params = {
+        "select": "id,score,article_count,source_count,"
+        "label,why_relevant_sv,llm_relevance",
+        "score": "not.is.null",
+        "article_count": "gt.0",
+        "order": "score.desc,id.asc",
+        "limit": str(top + FETCH_EXTRA),
+    }
+    if labelled_only:
+        params["label"] = "not.is.null"
+    topic_rows = supabase_get(base_url, key, overview, params)
     if not topic_rows:
         return [], []
 

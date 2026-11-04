@@ -961,3 +961,21 @@ def test_unsafe_table_name_stops_before_any_request(supabase_env, monkeypatch):
 
     assert "TOPICS_TABLE is not a valid view name" in str(stopped.value)
     assert requests == []
+
+
+def test_supabase_reads_all_topics_unless_labelled_only(supabase_env, monkeypatch):
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen",
+        fake_supabase(
+            {"topic_overview": OVERVIEW_ROWS, "topic_top_articles": ARTICLE_ROWS},
+            requests,
+        ),
+    )
+
+    load_supabase(top=2)
+    load_supabase(top=2, labelled_only=True)
+
+    first, _, third, _ = (parse_qs(urlparse(r.full_url).query) for r in requests)
+    assert "label" not in first
+    assert third["label"] == ["not.is.null"]

@@ -7,7 +7,7 @@ BEGIN;
 CREATE OR REPLACE FUNCTION public.save_topic_group(p_news_ids bigint[])
 RETURNS bigint
 LANGUAGE plpgsql
-SECURITY INVOKER
+SECURITY DEFINER
 SET search_path = pg_catalog
 AS $function$
 DECLARE

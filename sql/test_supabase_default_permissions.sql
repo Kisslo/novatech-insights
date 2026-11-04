@@ -1,4 +1,5 @@
 -- Local/CI test only. Makes no database changes.
+-- Run after migrations 001–005, BEFORE migration 006.
 \set ON_ERROR_STOP on
 
 DO $test$
@@ -20,6 +21,16 @@ BEGIN
         ) THEN
             RAISE EXCEPTION
                 'FAIL: required test role % is missing', role_name;
+        END IF;
+
+        IF has_function_privilege(
+            role_name,
+            'public.save_topic_group(bigint[])',
+            'EXECUTE'
+        ) THEN
+            RAISE EXCEPTION
+                'FAIL: role % can execute saving function before backend grants',
+                role_name;
         END IF;
 
         FOREACH object_name IN ARRAY ARRAY[
@@ -84,6 +95,8 @@ BEGIN
 
     RAISE NOTICE
         'PASS: automatic grants removed from new tables, views and sequence';
+    RAISE NOTICE
+        'PASS: saving function execution denied before backend grants';
     RAISE NOTICE
         'PASS: existing news grants remain unchanged';
 END;

@@ -26,16 +26,34 @@ INSERT INTO test_topic_ids (id, is_empty)
 SELECT id, true FROM new_topic;
 
 WITH new_articles AS (
-    INSERT INTO public.news (title, link, source, published)
+    INSERT INTO public.news (
+        title, link, source, source_normalized, published
+    )
     VALUES
-        ('Test article A', 'https://example.com/count-test-a',
-         'Source A', '2026-10-28 12:00:00+00'),
-        ('Test article B', 'https://example.com/count-test-b',
-         'Source A', '2026-10-29 12:00:00+00'),
-        ('Test article C', 'https://example.com/count-test-c',
-         'Source A', '2026-10-30 12:00:00+00'),
-        ('Test article D', 'https://example.com/count-test-d',
-         'Source B', '2026-10-30 13:00:00+00')
+        (
+            'Test article A',
+            'https://example.com/count-test-a',
+            'Source A', 'source a',
+            '2026-10-28 12:00:00+00'
+        ),
+        (
+            'Test article B',
+            'https://example.com/count-test-b',
+            'Source A', 'source a',
+            '2026-10-29 12:00:00+00'
+        ),
+        (
+            'Test article C',
+            'https://example.com/count-test-c',
+            'Source A', 'source a',
+            '2026-10-30 12:00:00+00'
+        ),
+        (
+            'Test article D',
+            'https://example.com/count-test-d',
+            'Source B', 'source b',
+            '2026-10-30 13:00:00+00'
+        )
     RETURNING id
 )
 INSERT INTO public.topic_articles (topic_id, news_id)
@@ -66,14 +84,20 @@ BEGIN
         RAISE EXCEPTION 'FAIL: expected 2 displayed articles';
     END IF;
 
-    IF (SELECT count(DISTINCT news_id)
-        FROM test_display_results) <> 2 THEN
+    IF (
+        SELECT count(DISTINCT news_id)
+        FROM test_display_results
+    ) <> 2 THEN
         RAISE EXCEPTION 'FAIL: displayed articles must be distinct';
     END IF;
 
-    IF (SELECT count(DISTINCT source)
-        FROM test_display_results) <> 2 THEN
-        RAISE EXCEPTION 'FAIL: expected 2 different sources';
+    IF (
+        SELECT count(DISTINCT NULLIF(n.source_normalized, ''))
+        FROM test_display_results AS displayed
+        JOIN public.news AS n ON n.id = displayed.news_id
+    ) <> 2 THEN
+        RAISE EXCEPTION
+            'FAIL: expected 2 different normalized sources';
     END IF;
 
     IF EXISTS (
@@ -90,7 +114,8 @@ BEGIN
         SELECT array_agg(title ORDER BY rank_in_topic)
         FROM test_display_results
     ) IS DISTINCT FROM ARRAY[
-        'Test article D', 'Test article C'
+        'Test article D',
+        'Test article C'
     ]::text[] THEN
         RAISE EXCEPTION
             'FAIL: expected newest Source B article, then newest Source A article';

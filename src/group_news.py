@@ -12,6 +12,11 @@ import numpy as np
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 
+if __package__:
+    from .source_normalization import normalize_source
+else:
+    from source_normalization import normalize_source
+
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
@@ -149,7 +154,7 @@ def deduplicate_articles(articles):
             continue
 
         normalized_link = normalize_url(article.get("link"))
-        source = (article.get("source") or "").strip().casefold()
+        source = normalize_source(article.get("source"))
         normalized = normalize_title(title)
 
         if normalized_link:
@@ -338,10 +343,9 @@ def build_groups(articles, embeddings):
         group_articles = [articles[index] for index in indices]
 
         sources = {
-            (article.get("source") or "").strip().casefold()
-            for article in group_articles
-            if (article.get("source") or "").strip()
+            normalize_source(article.get("source")) for article in group_articles
         }
+        sources.discard("")
 
         if len(sources) < 2:
             continue

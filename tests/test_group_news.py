@@ -318,3 +318,23 @@ def test_build_groups_treats_source_name_variants_as_one_source():
         assert build_groups(articles, embeddings) == [], (
             f"Source variants counted separately: {first_source!r}, {second_source!r}"
         )
+
+
+def test_normalize_source_handles_case_unicode_and_whitespace():
+    from src.source_normalization import normalize_source
+
+    cases = [
+        ("Reuters", "reuters"),
+        ("reuters", "reuters"),
+        ("Straße", "strasse"),
+        ("STRASSE", "strasse"),
+        ("\u00a0Reuters\u00a0", "reuters"),
+        ("\tSOURCE A\n", "source a"),
+        ("KÄLLA", "källa"),
+        ("", ""),
+        (" \t\n", ""),
+        (None, ""),
+    ]
+
+    for source, expected in cases:
+        assert normalize_source(source) == expected

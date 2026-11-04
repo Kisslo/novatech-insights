@@ -1,8 +1,8 @@
 -- Draft migration for issue #26.
 -- Local testing only until reviewed.
 -- Whitespace-only descriptions are treated as empty.
--- Source comparisons ignore case and surrounding ASCII whitespace.
--- Full alignment with Python Unicode casefold/strip remains pending.
+-- Source comparisons use Python-generated source_normalized keys.
+-- Existing articles require backfill before production use.
 -- Backend grants are applied separately by migration 006.
 
 BEGIN;
@@ -18,10 +18,7 @@ SELECT
     t.score,
     COUNT(n.id) AS article_count,
     COUNT(
-        DISTINCT NULLIF(
-            lower(btrim(n.source, E' \t\n\r\f\013')),
-            ''
-        )
+        DISTINCT NULLIF(n.source_normalized, '')
     ) AS source_count
 FROM public.topics AS t
 LEFT JOIN public.topic_articles AS ta
@@ -44,6 +41,7 @@ WITH candidates AS (
         n.id AS news_id,
         n.title,
         n.source,
+        n.source_normalized,
         n.link,
         n.description,
         n.published,
@@ -61,10 +59,7 @@ ranked_per_source AS (
         ROW_NUMBER() OVER (
             PARTITION BY
                 topic_id,
-                NULLIF(
-                    lower(btrim(source, E' \t\n\r\f\013')),
-                    ''
-                )
+                NULLIF(source_normalized, '')
             ORDER BY
                 has_description DESC,
                 published DESC NULLS LAST,
@@ -106,7 +101,6 @@ REVOKE ALL ON TABLE public.topic_top_articles FROM PUBLIC;
 
 -- Remove automatic grants when Supabase roles exist.
 -- Reapply migration 006 after rerunning this migration locally.
-
 DO $permissions$
 DECLARE
     role_name text;
@@ -127,13 +121,14 @@ $permissions$;
 COMMENT ON VIEW public.topic_overview IS
 'Topic details and counts across all linked articles.
 Includes empty topics; the reader filters before limiting results.
-Source counts ignore case and surrounding ASCII whitespace.
-NULL and blank source names are excluded from source counts.';
+Source counts use stored Python-normalized comparison keys.
+NULL and empty keys are excluded from source counts.
+Existing rows require source-key backfill before production use.';
 
 COMMENT ON VIEW public.topic_top_articles IS
 'Up to three articles per topic, at most one per normalized source.
-Source comparisons ignore case and surrounding ASCII whitespace.
-NULL and blank sources share one selection bucket.
+Source selection uses stored Python-normalized comparison keys.
+NULL and empty keys share one selection bucket.
 Original source names are preserved for display.
 Prefer descriptions, then newer dates, then smaller news IDs.
 Readers must order by topic_id and rank_in_topic.';

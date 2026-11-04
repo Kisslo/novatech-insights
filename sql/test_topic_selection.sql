@@ -76,6 +76,23 @@ WITH inserted AS (
 )
 INSERT INTO selection_articles
 SELECT id, link FROM inserted;
+-- Explicit fixture keys matching the shared Python normalization rule.
+-- Only update articles created by this test.
+UPDATE public.news AS n
+SET source_normalized = expected.normalized
+FROM selection_articles AS a,
+    (
+        VALUES
+            ('Source A', 'source a'),
+            (E'\tsource a\n', 'source a'),
+            ('Source B', 'source b'),
+            ('Source C', 'source c'),
+            ('SOURCE C', 'source c'),
+            ('Source D', 'source d'),
+            ('Source E', 'source e')
+    ) AS expected(original, normalized)
+WHERE n.id = a.id
+  AND n.source = expected.original;
 
 INSERT INTO public.topic_articles (topic_id, news_id)
 SELECT t.id, a.id
@@ -124,9 +141,12 @@ BEGIN
         RAISE EXCEPTION 'FAIL: expected exactly 3 articles';
     END IF;
 
-    IF (SELECT count(DISTINCT source)
-        FROM selection_results) <> 3 THEN
-        RAISE EXCEPTION 'FAIL: expected 3 different sources';
+        IF (
+        SELECT count(DISTINCT NULLIF(n.source_normalized, ''))
+        FROM selection_results AS selected
+        JOIN public.news AS n ON n.id = selected.news_id
+    ) <> 3 THEN
+        RAISE EXCEPTION 'FAIL: expected 3 different normalized sources';
     END IF;
 
     IF (
@@ -154,5 +174,84 @@ $test$;
 SELECT *
 FROM selection_results
 ORDER BY rank_in_topic;
+DO $unicode_test$
+DECLARE
+    test_topic_id bigint;
+    expected_ids bigint[];
+    actual_ids bigint[];
+BEGIN
+    INSERT INTO public.topics (label)
+    VALUES ('Local Unicode source test')
+    RETURNING id INTO test_topic_id;
+
+    WITH inserted AS (
+        INSERT INTO public.news (
+            title, link, source, source_normalized,
+            published, description
+        )
+        VALUES
+            (
+                'Reuters article one',
+                'https://example.com/unicode-reuters-one',
+                'Reuters', 'reuters',
+                '2026-10-30 12:00:00+00', 'Useful description'
+            ),
+            (
+                'Reuters article two',
+                'https://example.com/unicode-reuters-two',
+                'reuters', 'reuters',
+                '2026-10-30 12:00:00+00', 'Useful description'
+            ),
+            (
+                'Street article one',
+                'https://example.com/unicode-street-one',
+                'Straße', 'strasse',
+                '2026-10-30 12:00:00+00', 'Useful description'
+            ),
+            (
+                'Street article two',
+                'https://example.com/unicode-street-two',
+                'STRASSE', 'strasse',
+                '2026-10-30 12:00:00+00', 'Useful description'
+            )
+        RETURNING id
+    )
+    INSERT INTO public.topic_articles (topic_id, news_id)
+    SELECT test_topic_id, id FROM inserted;
+
+    SELECT array_agg(chosen.id ORDER BY chosen.id)
+    INTO expected_ids
+    FROM (
+        SELECT min(n.id) AS id
+        FROM public.news AS n
+        JOIN public.topic_articles AS ta ON ta.news_id = n.id
+        WHERE ta.topic_id = test_topic_id
+        GROUP BY n.source_normalized
+    ) AS chosen;
+
+    SELECT array_agg(news_id ORDER BY news_id)
+    INTO actual_ids
+    FROM public.topic_top_articles
+    WHERE topic_id = test_topic_id;
+
+    IF actual_ids IS DISTINCT FROM expected_ids THEN
+        RAISE EXCEPTION
+            'FAIL: Unicode selection expected %, got %',
+            expected_ids, actual_ids;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.topic_overview
+        WHERE id = test_topic_id
+          AND article_count = 4
+          AND source_count = 2
+    ) THEN
+        RAISE EXCEPTION 'FAIL: expected 4 articles and 2 normalized sources';
+    END IF;
+
+    RAISE NOTICE 'PASS: Unicode source counts and selection';
+END;
+$unicode_test$;
 
 ROLLBACK;

@@ -1,307 +1,318 @@
 # Topic Storage Verification
 
-Last updated: 2026-11-03
-Status: Local and CI verification for issue #26 and draft PR #39.
-Migrations 002–006 have not been applied to Supabase.
+Last updated: 2026-11-04
 
-## Current verification status
+Issue: #26
 
-All three GitHub CI checks passed on commit 0eb4cee:
+PR: #39
+
+Migrations 002–006 have NOT been applied to Supabase.
+No production backfill or live REST verification has been performed.
+
+## Current local results
+
+The following results were confirmed locally on 2026-11-04.
+
+| Check | Result |
+|---|---|
+| Full Python test suite | 241 passed |
+| Repository-wide Ruff check | Passed |
+| Repository-wide Ruff formatting check | Passed; 43 files already formatted |
+| Grouping Python tests | 21 passed |
+| Storage source-normalization tests | 5 passed |
+| Source-normalization backfill tests | 5 passed |
+| SQL article selection | Passed |
+| SQL Unicode source counts and selection | Passed |
+| SQL full-topic counts and empty topics | Passed |
+| SQL reader permissions and row security | Passed |
+| SQL backend permissions, including label writeback | Passed |
+
+The three focused Python test files were initially run separately.
+The complete repository test suite subsequently passed with 241 tests.
+
+SQL fixture records were rolled back. The row-security test also rolled
+back its temporary roles, policies and grants.
+
+Migration changes applied to the local test database remain there.
+
+## Current CI status
+
+All three CI checks passed on the latest confirmed pushed commit,
+a8f979f:
 
 - Ruff and pytest.
 - PostgreSQL tests (0.8.2-pg17).
 - PostgreSQL tests (pg17).
 
-CI tests migrations 001–005 in an empty PostgreSQL database
-and a separate database with simulated Supabase default grants.
-It checks that automatic grants are removed before applying
-migration 006, then verifies actual backend permissions in
-both databases.
+That result predates the current source-key, SECURITY DEFINER,
+label-permission and backfill changes.
 
-These checks do not establish deployment or full-workflow
-integration in Supabase.
+The current changes still need to be committed, pushed and checked
+by CI. Historical green checks do not validate the newer changes.
 
-## Verified storage and read behavior
+## Local environment and migration handling
 
-- Topic counts include all linked articles and distinct stored sources.
-- Article selection returns at most three articles per topic,
-  with at most one article per source.
-- Articles with descriptions are preferred; whitespace-only
-  descriptions are treated as empty.
-- Publication date descending and news_id ascending determine
-  the remaining article order.
-- Empty topics remain visible in topic_overview with zero counts.
-- Empty topics have no rows in topic_top_articles.
-- Duplicate memberships and missing references are rejected.
-- Foreign keys prevent deletion of linked articles and topics.
-- Reader permissions and row-security policies affect view results.
+Container: novatech-topic-test
 
-## Group saving
+Database: novatech_test
 
-Migration 005 defines public.save_topic_group(bigint[]).
+The existing local database already had the embedding column.
 
-Verified locally and in CI:
+Instead of rerunning migration 002, the new source_normalized column
+was added separately with type text and COLLATE "C".
 
-- A topic and all its article links are saved together.
-- Saving the same article-ID set reuses the existing topic.
-- Reordering or repeating input IDs does not create another topic.
-- Reusing a topic preserves its existing label and score fields.
-- A missing article reference causes the save to fail without
-  leaving a partial topic or membership records.
+Updated migrations 004, 005 and 006 were applied locally.
 
-Calls use a transaction-level advisory lock. Membership writers
-must use this function for the locking convention to work.
-Concurrent saves have not been tested with parallel sessions.
+Migration 006 was reapplied after migration 004 because migration 004
+revokes the view grants.
 
-A changed article-ID set creates a new topic. Existing topics
-are not retired, replaced or deleted automatically. The team
-must agree how older and overlapping groups should be handled.
+These local steps do not establish that the revised migrations execute
+successfully from scratch. CI provides the fresh-database checks.
 
-## Python integration
+Do not rerun migration 001 against the existing production news table.
 
-src/group_news.py remains read-only unless --save is supplied.
-With --save, it sends each full group to the database function
-through the Supabase REST API.
+## Source normalization
 
-The display limits do not limit the groups or memberships saved.
-Each group is saved in a separate request. If a later group
-fails, earlier groups may already be committed.
+The shared Python rule is:
 
-Python tests use fake responses and verify:
+    (source or "").strip().casefold()
 
-- The request includes all distinct article IDs.
-- The secret key is sent only in the apikey header.
-- Invalid article IDs are rejected before sending a request.
-- HTTP errors, connection failures and invalid responses are handled.
-- Saving requires the explicit --save option.
-- A saving failure stops processing subsequent groups.
+The uploader stores this result in news.source_normalized.
+Grouping uses the same shared helper.
 
-These tests do not verify a live REST API connection.
+The original source name remains available for display. Existing
+uploader trimming of surrounding whitespace is unchanged.
 
-## Backend permissions
+SQL views compare stored keys directly instead of using lower() and
+ASCII-only trimming.
 
-Migration 006 defines permissions for the shared service_role:
+Python tests cover:
 
-- SELECT on news, topics, topic_articles and both read views.
-- INSERT on topics and topic_articles.
-- USAGE on topics_id_seq.
-- EXECUTE on save_topic_group(bigint[]).
-- UPDATE on score, score_calculated_at, score_version and
-  score_breakdown in topics.
+- Reuters and reuters.
+- Straße and STRASSE.
+- Surrounding nonbreaking spaces.
+- Tabs, newlines and ordinary spaces.
+- Swedish letter case.
+- Missing and blank source names.
 
-The migration preserves existing news permissions and adds
-SELECT access. It does not restrict other existing news grants.
+The SQL Unicode fixture verifies:
 
-The backend test uses the actual migration grants with a
-non-superuser service_role that bypasses RLS.
+- Four articles with Reuters/reuters and Straße/STRASSE.
+- A source_count of two.
+- One selected article per normalized source.
+- Smaller article IDs resolve equal description/date ties.
 
-Verified locally and in CI:
+The existing eight-article selection fixture still passes:
 
-- The backend reads news and saves or reuses complete groups.
-- It updates the four ranking fields.
-- It reads both views and their full topic counts.
-- Updating existing labels is denied.
-- Updating memberships is denied.
-- Deleting topics or memberships is denied.
+- Full article count: eight.
+- Full normalized source count: five.
+- Selected order: Source B, Source C, Source A.
+- Description presence takes priority over recency.
+- Whitespace-only descriptions are treated as empty.
+- Smaller news_id resolves the Source C tie.
 
-All programs using service_role share these permissions.
-They are not isolated from one another. Direct INSERT access
-is available because the saving function uses SECURITY INVOKER;
-using the function is an application convention.
+## Existing-row backfill
 
-Migration 006 skips its grants if service_role does not exist.
-CI creates that role before applying and testing the grants.
+src/backfill_source_normalization.py is implemented.
 
-Test records are rolled back. Grants applied by migration 006
-remain in the local test databases.
+Its tests use fake responses and verify:
 
-## Remaining review and deployment work
+- Default operation performs reads only.
+- Pagination continues across short pages until an empty page.
+- Updates change only source_normalized.
+- Updates check the article ID, original source and previous key.
+- Already-correct keys are skipped.
+- An update matching no visible row stops the run.
+- Filter quoting handles quotes and backslashes.
+- Missing required fields stop processing before writing that row.
 
-- Review the schema, saving behavior and shared backend permissions.
-- Agree how changed, overlapping and old groups are handled.
-- Confirm embedding metadata, update and regeneration requirements.
-- Align topic eligibility, freshness and source identity rules.
-- Update the data contract and usage documentation.
-- Confirm deployment responsibility and migration order.
-- Verify compatibility and existing-data preservation in the
-  intended Supabase environment.
-- Test actual REST API access and the complete
-  grouping-to-ranking-to-reader workflow.
+The backfill has NOT been run against Supabase.
 
-PR #39 remains Draft. Passing CI does not mean issue #26 is
-fully complete or that the database changes are deployed.
+The tests do not establish live PostgREST filter behavior, complete
+row visibility or UPDATE permission.
 
-## Historical verification notes
+Before production use, verify the required access and coordinate
+article writers. All required existing rows must have correct keys,
+and future writers must maintain those keys.
 
-The sections below record earlier stages. Their statements
-about pending implementation and tests describe those dates,
-not the current status above.
+## Topic counts and selected articles
 
-## Permission verification - 2026-10-31
+The updated count test passed locally.
 
-sql/test_topic_permissions.sql passed locally and in GitHub CI.
-Both CI jobs passed on commit 476780f.
-
-Verified with test roles:
-
-- A role without view permissions cannot read either view.
-- View grants alone do not provide underlying table access.
-- A reader with SELECT grants but no matching RLS policies
-  sees no rows.
-- Both views respect the reader's row-security policies.
-- Counts include only articles visible to the reader.
-
-Test roles, policies, grants and rows were rolled back.
-
-These checks verify the views with local test permissions.
-Final backend grants, Supabase roles and production access
-still require agreement and verification.
-
-## Supabase default-permission tests - 2026-10-31
-
-Both CI jobs passed on commit 8c8c617.
-
-A separate local/CI database reproduces the inspected Supabase
-default grants for anon, authenticated and service_role.
+Its fixture contains four articles from two normalized sources.
 
 Verified:
 
-- Migrations 001–004 execute successfully with these defaults.
-- Automatic grants are removed from topics, topic_articles,
-  topic_overview, topic_top_articles and topics_id_seq.
-- Existing news grants remain unchanged.
-- Count, relationship, selection and row-security tests pass
-  in this environment.
+- article_count remains four.
+- source_count remains two.
+- Two articles are displayed, one per source.
+- The newest Source B article precedes the newest Source A article.
+- Display ranks are one and two.
+- Empty topics appear in topic_overview with zero counts.
+- Empty topics have no selected articles.
 
- Final backend grants are still pending. In the test database,
-service_role has no access to the new topic objects.
-Explicit backend grants still need to be defined.
+Counts include all linked articles before display selection.
 
-This is a simulation of the inspected permissions, not full
-Supabase compatibility verification. pgvector 0.8.2 compatibility
-and production integration remain unverified.
+The views have no publication-date or lifecycle filter.
+
+NULL and empty normalized keys do not contribute to source_count.
+They share one article-selection bucket.
+
+## Reader permissions and row security
+
+The updated sql/test_topic_permissions.sql passed locally.
+
+Verified:
+
+- A role without view grants cannot read either view.
+- View grants alone do not provide underlying table access.
+- A reader with SELECT grants but no matching RLS policies sees no rows.
+- Both views respect the reader's row-security policies.
+- Counts include only reader-visible articles.
+- Hidden articles and hidden topic memberships are not exposed.
+
+The views remain SECURITY INVOKER.
+
+## Group saving and backend permissions
+
+save_topic_group(bigint[]) now uses SECURITY DEFINER with
+search_path = pg_catalog.
+
+The function and both topic tables were confirmed to be owned by
+postgres in the local database.
+
+Deployment must verify the trusted function owner, its required
+privileges and restricted EXECUTE grants.
+
+The updated backend test passed using the actual migration 006 grants
+and a non-superuser service_role with BYPASSRLS.
+
+Verified:
+
+- Effective direct INSERT privileges on topic tables are absent.
+- Direct topic and membership inserts are denied.
+- Saving through the function succeeds.
+- Reordered article IDs reuse the existing complete group.
+- The four ranking fields can be updated.
+- Both views and full counts are readable.
+- label, why_relevant_sv and llm_relevance can be updated.
+- Label writeback does not alter ranking fields.
+- Blank labels and explanations are rejected.
+- Out-of-range relevance is rejected.
+- Group reuse preserves labels and ranking fields.
+- Membership updates are denied.
+- Topic and membership deletes are denied.
+
+All programs using service_role share these permissions.
+
+The function uses a transaction-level advisory lock.
+Parallel-session concurrency has not been tested.
+
+The existing save-group test also checks exact-set reuse, metadata
+preservation and rollback when an article reference is missing.
+It needs no source-key fixture change because it does not read the
+source-count or selection views. Its latest version remains covered
+by the pending CI run.
+
+## Automatic Supabase-style grants
+
+CI creates a separate novatech_permissions_test database with simulated
+Supabase default grants.
+
+It applies migrations 001–005 and tests automatic-grant removal BEFORE
+applying migration 006.
+
+The default-permission test was extended to check that anon,
+authenticated and service_role cannot execute save_topic_group before
+the explicit backend grant.
+
+This new assertion has not yet been run for the current changes.
+It will run in the existing CI workflow.
+
+Do not run this pre-006 test against a database where migration 006
+has already granted service_role access.
+
+setup_supabase_permission_test.sql is LOCAL/CI ONLY.
+Never run it in the real Supabase project.
+
+## CI coverage
+
+The workflow tests two pgvector image tags:
+
+- 0.8.2-pg17.
+- pg17.
+
+For each image, it:
+
+1. Applies migrations 001–005 to an empty database.
+2. Runs counts, constraints, selection, reader-permission and saving tests.
+3. Creates a separate database with simulated Supabase default grants.
+4. Applies migrations 001–005 there.
+5. Checks automatic grants before migration 006.
+6. Runs the SQL assertions in that database.
+7. Applies migration 006 and tests backend permissions in both databases.
+
+The Python job runs repository-wide Ruff, formatting checks and pytest.
+
+No workflow change was needed for the current additions.
+
+## Lifecycle and application integration
+
+Changed article-ID sets can create new topics. Existing topics are not
+automatically retired, updated or deleted.
+
+Old-topic handling was accepted as a follow-up.
+
+A later review proposed last_seen_at and Telegram-related status values.
+Neither is implemented. Their scope and behavior still need agreement.
+
+A non-NULL label does not establish that a topic is current.
+
+This PR grants label writeback permissions. The application code that
+generates and saves labels is planned separately.
+
+Grouping saves each complete group in a separate REST request.
+Ranking updates are proposed per topic, with all four ranking fields
+sent together. There is no ranking batch RPC.
+
+## Remaining verification
+
+Before merging:
+
+- Inspect the final changes and finish documentation/comment updates.
+- Settle the scope of the later lifecycle/status suggestions.
+- Commit and push the changes.
+- Confirm all CI checks pass for the final commit.
+
+Before production use:
+
+- Verify the migration plan against the existing Supabase schema.
+- Confirm ownership, extension compatibility and permissions.
+- Preserve news, news_articles, rss_feeds and existing IDs.
+- Verify source-key backfill access and complete its execution.
+- Verify live REST reads, group saves, label/ranking updates and views.
+- Test the complete grouping-to-ranking-to-reader workflow.
+
+Local SQL and mocked API tests do not establish production readiness.
+Merging PR #39 does not automatically complete issue #26.
+
+## Historical evidence
+
+These results describe earlier versions, not the current unpushed code.
+
+| Date / commit | Historical result |
+|---|---|
+| 2026-10-29 | Local topic constraints and early count-query assertions passed. |
+| 2026-10-29 | GitHub Actions verified the early migrations and count query. |
+| 476780f | Reader-permission and RLS tests passed in CI. |
+| 8c8c617 | Simulated Supabase default-grant tests passed in CI. |
+| 2026-11-01 | Local pgvector 0.8.2 migration and SQL tests passed. |
+| 0eb4cee | Earlier full CI checks passed. |
+| 7f1ff0f | CI passed after the earlier source-comparison formatting fix. |
+| a8f979f | Latest confirmed pushed commit; all three CI checks passed. |
+
+Earlier tests used different source comparison rules and backend grants.
+Those earlier permissions and query examples are superseded by the
+current implementation described above.
 
 No migrations were applied to Supabase during these checks.
-
-## pgvector 0.8.2 verification - 2026-11-01
-
-Migrations 001–004 and all five SQL test scripts passed locally
-using pgvector/pgvector:0.8.2-pg17 with simulated Supabase
-default grants.
-
-Verified versions:
-- PostgreSQL 17.10
-- pgvector 0.8.2
-
-Passing tests cover default permissions, topic counts,
-relationships, article selection and reader row security.
-
-This verifies the tested behavior with pgvector 0.8.2.
-The inspected Supabase server uses PostgreSQL 17.11, so this
-is not an exact match of the full Supabase environment.
-
-No migrations were applied to Supabase. Final backend grants
-and full-workflow integration remain pending.
-
-## Test environment
-
-- Container: novatech-topic-test
-- Database: novatech_test
-- PostgreSQL: 17.11
-- pgvector: 0.8.7
-- Used an empty news table created from sql/001_create_news.sql.
-
-Supabase inspection reported pgvector 0.8.2 as available
-but not installed. These local tests do not establish
-compatibility with that exact version or verify Supabase access.
-
-## Results
-
-| Check | Result |
-|---|---|
-| Draft migration executes locally | Passed |
-| embedding column has type vector(384) | Passed |
-| Article insertion without embedding succeeds | Passed |
-| A 384-dimensional test vector is accepted | Passed |
-| A 3-dimensional test vector is rejected | Passed |
-
-Test inserts were rolled back.
-Dummy vectors were used; no real embeddings were generated.
-
-## Remaining work
-
-- Agree embedding metadata and update rules.
-- Implement and test topic storage and article-topic links.
-- Implement and test the agreed read interface and permissions.
-- Test against the intended deployment versions.
-- Update the data contract and obtain review.
-- Record deployment verification after an approved migration.
-
-## Topic storage tests — 2026-10-29
-
-Applied sql/003_create_topics_and_links.sql successfully in
-the local novatech_test database.
-
-| Check | Result |
-|---|---|
-| One article can belong to two topics | Passed |
-| Duplicate article-topic pairs are rejected | Passed |
-| References to missing articles are rejected | Passed |
-| References to missing topics are rejected | Passed |
-| llm_relevance = 6 is rejected | Passed |
-| llm_relevance values 1 and 5 are accepted | Passed |
-| A score without its supporting fields is rejected | Passed |
-| All four score fields can be saved together | Passed |
-
-Test records were rolled back. Failed transactions were rolled
-back when their connections closed.
-
-These are manual local tests, not production verification.
-Table names, field types and the requirement to save all four
-score fields together remain proposals for team review.
-
-Read-interface behavior, backend permissions, deletion protection
-and the remaining constraints still require testing.
-No changes have been applied to Supabase.
-## Topic count query — 2026-10-29
-
-Ran sql/test_topic_counts.sql in the local test database.
-
-- Created four articles: three from Source A and one from Source B.
-- Displayed only the three Source A articles.
-- article_count remained 4.
-- source_count remained 2, including the undisplayed source.
-- rank_in_topic returned positions 1, 2 and 3.
-- All test records were rolled back.
-
-This verifies the example query on a small fixture.
-It does not verify a deployed read interface.
-Article ID ordering is for testing only; the final article-selection
-rule remains open.
-### Automated assertions — 2026-10-29
-
-Updated sql/test_topic_counts.sql to raise an exception when
-expected results are incorrect.
-
-Verified locally:
-- Exactly three distinct articles are displayed.
-- All displayed articles come from Source A.
-- Full counts remain four articles and two sources.
-- Article positions are 1, 2 and 3.
-
-Result: PASS: all topic-count assertions passed.
-Test records were rolled back.
-
-These assertions test the example query, not a deployed read
-interface. They have not been integrated into CI.
-
-### GitHub Actions verification — 2026-10-29
-
-The "PostgreSQL migrations and topic counts" job passed on PR #39.
-
-It applied migrations 001, 002 and 003 to an empty temporary
-PostgreSQL database and ran the topic-count assertions.
-
-This verifies fresh-database migration execution and the example
-count query. It does not verify production deployment, backend
-permissions or the final ranked-topic read interface.

@@ -31,24 +31,28 @@ BEGIN
     RETURNING id INTO hidden_topic;
 
     INSERT INTO public.news (
-        title, link, source, published, description
+        title, link, source, source_normalized,
+        published, description
     )
     VALUES (
         'Permission test visible article',
         'https://example.com/permission-visible',
         'Permission Source A',
+        'permission source a',
         '2026-10-30 12:00:00+00',
         'Visible description'
     )
     RETURNING id INTO visible_article;
 
     INSERT INTO public.news (
-        title, link, source, published, description
+        title, link, source, source_normalized,
+        published, description
     )
     VALUES (
         'Permission test hidden article',
         'https://example.com/permission-hidden',
         'Permission Source B',
+        'permission source b',
         '2026-10-30 13:00:00+00',
         'Hidden description'
     )

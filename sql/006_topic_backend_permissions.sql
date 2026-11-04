@@ -39,15 +39,11 @@ BEGIN
         public.topic_top_articles
     TO service_role;
 
-    GRANT INSERT ON TABLE
-        public.topics,
-        public.topic_articles
-    TO service_role;
 
-    GRANT USAGE ON SEQUENCE public.topics_id_seq
-    TO service_role;
 
-    GRANT EXECUTE ON FUNCTION public.save_topic_group(bigint[])
+
+
+GRANT EXECUTE ON FUNCTION public.save_topic_group(bigint[])
     TO service_role;
 
     GRANT UPDATE (
@@ -55,6 +51,12 @@ BEGIN
         score_calculated_at,
         score_version,
         score_breakdown
+    ) ON public.topics TO service_role;
+
+    GRANT UPDATE (
+        label,
+        why_relevant_sv,
+        llm_relevance
     ) ON public.topics TO service_role;
 END;
 $permissions$;

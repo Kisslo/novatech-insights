@@ -181,3 +181,22 @@ jobs:
               psql -X -U postgres -d "$test_database" \
               -v ON_ERROR_STOP=1 < sql/test_topic_backend_permissions.sql
           done
+
+      - name: Test post-backfill source-key requirement
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          # Earlier tests roll back their article fixtures.
+          # Production requires a verified backfill before migration 007.
+          for test_database in novatech_test novatech_permissions_test
+          do
+            echo "Applying source-key requirement to $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/007_require_normalized_sources.sql
+
+            echo "Testing required source keys in $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/test_required_source_normalization.sql
+          done

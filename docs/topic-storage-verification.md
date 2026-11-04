@@ -37,18 +37,20 @@ Migration changes applied to the local test database remain there.
 
 ## Current CI status
 
-All three CI checks passed on the latest confirmed pushed commit,
-a8f979f:
+All three CI checks passed on commit 7e0013e:
 
 - Ruff and pytest.
 - PostgreSQL tests (0.8.2-pg17).
 - PostgreSQL tests (pg17).
 
-That result predates the current source-key, SECURITY DEFINER,
-label-permission and backfill changes.
+Migration 007, its constraint test and the new CI step were added
+after that commit. These additions still need to be pushed and pass CI.
 
-The current changes still need to be committed, pushed and checked
-by CI. Historical green checks do not validate the newer changes.
+Locally, migration 007 succeeded after the missing-key count returned
+zero. Its test confirmed that valid normalized articles save, omitted
+keys are rejected and NULL updates are rejected. Test data rolled back.
+
+No Supabase migration or production backfill has been performed.
 
 ## Local environment and migration handling
 
@@ -254,7 +256,9 @@ For each image, it:
 
 The Python job runs repository-wide Ruff, formatting checks and pytest.
 
-No workflow change was needed for the current additions.
+A final CI step now applies migration 007 and tests required source keys
+in both test databases, after the earlier SQL tests have completed.
+Production must complete and verify the backfill before migration 007.
 
 ## Lifecycle and application integration
 

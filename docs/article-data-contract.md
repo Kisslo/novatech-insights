@@ -450,6 +450,44 @@ utf-8-sig.
 Descriptions are publisher RSS input, not generated summaries or
 verified full article text. Missing descriptions remain empty; grouping
 can use the title alone.
+## Required source keys after backfill
+
+Migration 007_require_normalized_sources.sql makes source_normalized
+NOT NULL. It must run only after the backfill has completed and its
+results have been verified.
+
+Production deployment order:
+
+1. Apply migrations 002–006 under the agreed migration plan.
+2. Ensure all article writers maintain the shared Python-normalized key.
+3. Run the backfill and verify the stored keys.
+4. Confirm that this query returns zero:
+
+       SELECT count(*)
+       FROM public.news
+       WHERE source_normalized IS NULL;
+
+5. Apply migration 007.
+6. Verify API behavior before enabling ranking and Telegram readers.
+
+The NULL-count check verifies completeness, not normalization correctness.
+
+After migration 007, an INSERT that omits source_normalized or an UPDATE
+that sets it to NULL fails. No default is supplied.
+
+An empty string remains valid for a missing or blank source name.
+The constraint does not detect incorrect keys or source-name changes
+that leave an old key unchanged.
+
+The planned pasted-article API must also supply the normalized key.
+For source = 'kisslo', the comparison key is 'kisslo'.
+
+Local testing confirmed that valid keys save, missing keys are rejected
+and NULL updates are rejected. Test records were rolled back.
+
+CI applies migration 007 after the earlier SQL tests and checks the
+constraint in both test databases. This does not perform a production
+backfill.
 
 ## Deployment and existing-data safeguards
 

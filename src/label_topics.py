@@ -11,12 +11,28 @@ Sources:
         id, score, article_count, source_count
     TOPICS_ARTICLES_VIEW (default topic_top_articles):
         topic_id, news_id, title, source, link, description, rank_in_topic
-    Topics without articles are left out, then topics are limited to --top
-        before their articles are read, and only articles with rank_in_topic 1-3
-        are read. The top-3 rule itself is decided in the view. Only the read
-        functions depend on the schema (#26). Supabase is only read, never written.
+    Topics without articles are left out, then topics are read page by page
+        (--top plus FETCH_EXTRA per page), and only articles with
+        rank_in_topic 1-3. The top-3 rule itself is decided in the view. Only
+        the read functions depend on the schema (#26). Without --save,
+        Supabase is only read.
+
+Invalid topics (for example an article without title, source or link) are
+skipped and reported, and the run continues (agreed with Mathias, #42).
+With Supabase, more pages are read until --top valid topics are found or the
+candidates run out, so skipped topics do not make the list shorter than
+--top when enough valid topics exist. MAX_PAGES is a safety limit.
 
 The list is saved in output/top<N>_<date>_<time>.md.
+
+Saving labels (`--save`, only with `--source supabase`, issue #42):
+- label, why_relevant_sv and llm_relevance are written to the table in
+  TOPICS_TABLE (default topics), one PATCH per labelled topic. Nothing else
+  is changed, and nothing is written to posts.
+- Topics that already have all three values are not sent to Claude again,
+  so old topics are not paid for twice. `--relabel` labels them again.
+- `--dry-run` never writes anything.
+- If saving fails for one topic, it is reported and the next topic is saved.
 
 Input format (one topic):
     {"id": 101, "score": 0.91, "article_count": 7, "source_count": 4,
@@ -47,6 +63,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -73,8 +90,12 @@ DEFAULT_EFFORT = "low"
 MAX_COST_USD = 0.5  # estimated cost per run must stay below this
 DEFAULT_OVERVIEW_VIEW = "topic_overview"
 DEFAULT_ARTICLES_VIEW = "topic_top_articles"
+DEFAULT_TOPICS_TABLE = "topics"
+LABEL_FIELDS = ("label", "why_relevant_sv", "llm_relevance")
 VIEW_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 SUPABASE_TIMEOUT_SECONDS = 30
+FETCH_EXTRA = 10  # extra topics per page, to replace skipped ones
+MAX_PAGES = 20  # safety limit for reading pages when many topics are invalid
 
 SYSTEM_PROMPT = """You are an editor for Novatech Solutions, a Swedish IT company.
 Novatech writes in Swedish about AI, automation and regulation for small
@@ -142,7 +163,22 @@ def normalize_topic(raw: dict) -> dict:
         ),
         "counts_from_articles": counted,
         "articles": articles,
+        # Labels already saved in topics (None when missing, e.g. in a fixture)
+        **{field: raw.get(field) for field in LABEL_FIELDS},
     }
+
+
+def existing_labels(topic: dict) -> dict | None:
+    """The labels already saved for a topic, or None if any of them is missing."""
+    label, why, relevance = (topic.get(field) for field in LABEL_FIELDS)
+    if not isinstance(label, str) or not label.strip():
+        return None
+    if not isinstance(why, str) or not why.strip():
+        return None
+    # bool is a subclass of int in Python, so True would otherwise pass as 1
+    if isinstance(relevance, bool) or not isinstance(relevance, int):
+        return None
+    return {"label": label, "why_relevant_sv": why, "llm_relevance": relevance}
 
 
 def has_articles(raw: dict) -> bool:
@@ -152,15 +188,44 @@ def has_articles(raw: dict) -> bool:
     return bool(raw.get("articles"))
 
 
-def load_fixture(path: Path) -> list[dict]:
+def normalize_topics(
+    raw_topics: list[dict],
+    limit: int | None = None,
+    check: Callable[[dict], object] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Normalize topics in order. An invalid topic is skipped, not fatal.
+
+    Stops when `limit` valid topics are found (None = no limit), so topics
+    after the limit are neither read nor reported.
+    `check` is an optional extra test on each normalized topic; if it raises
+    ValueError, the topic is skipped (the Telegram API checks the message).
+    Returns (valid topics, skipped topics as {"topic_id", "reason"}).
+    """
+    topics, skipped = [], []
+    for raw in raw_topics:
+        if limit is not None and len(topics) >= limit:
+            break
+        try:
+            topic = normalize_topic(raw)
+            if check is not None:
+                check(topic)
+            topics.append(topic)
+        except (ValueError, TypeError) as error:
+            # TypeError: e.g. score is null and float(None) fails
+            skipped.append({"topic_id": raw.get("id"), "reason": str(error)})
+    return topics, skipped
+
+
+def load_fixture(path: Path) -> tuple[list[dict], list[dict]]:
     """Read topics from a JSON file with the same fields as the read interface.
 
     Topics without articles are left out before --top is applied, the same
     way as the article_count=gt.0 filter in load_supabase.
+    Returns (valid topics, skipped topics).
     """
     with path.open(encoding="utf-8") as f:
         data = json.load(f)
-    return [normalize_topic(topic) for topic in data["topics"] if has_articles(topic)]
+    return normalize_topics([t for t in data["topics"] if has_articles(t)])
 
 
 class ReadError(Exception):
@@ -206,10 +271,21 @@ def supabase_get(base_url: str, key: str, view: str, params: dict) -> list[dict]
     return rows
 
 
-def load_supabase(top: int) -> list[dict]:
+def load_supabase(
+    top: int,
+    labelled_only: bool = False,
+    check: Callable[[dict], object] | None = None,
+) -> tuple[list[dict], list[dict]]:
     """Read the top ranked topics and their best 3 articles from Supabase.
 
-    Topics without articles are reported and left out of the list.
+    Reads pages of top + FETCH_EXTRA topics and skips topics without articles
+    or with an invalid article. It keeps reading the next page until `top`
+    valid topics are found or the candidates run out (agreed with Mathias),
+    at most MAX_PAGES pages.
+    labelled_only=True reads only topics that have a label (used by the
+    Telegram API, which never calls Claude). `check` is passed on to
+    normalize_topics().
+    Returns (valid topics, skipped topics as {"topic_id", "reason"}).
     """
     base_url = os.getenv("SUPABASE_URL", "").strip()
     key = os.getenv("SUPABASE_KEY", "").strip()
@@ -219,22 +295,45 @@ def load_supabase(top: int) -> list[dict]:
     articles_view = view_name("TOPICS_ARTICLES_VIEW", DEFAULT_ARTICLES_VIEW)
 
     # Choose the topics first, so the article rows cannot reduce the topic count.
-    # Topics without articles are left out before the --top limit (agreed in #29).
-    topic_rows = supabase_get(
-        base_url,
-        key,
-        overview,
-        {
-            "select": "id,score,article_count,source_count",
-            "score": "not.is.null",
-            "article_count": "gt.0",
-            "order": "score.desc,id.asc",
-            "limit": str(top),
-        },
-    )
-    if not topic_rows:
-        return []
+    # Topics without articles are left out before the limit (agreed in #29).
+    # The fixed order (score, then id) keeps the pages stable.
+    page_size = top + FETCH_EXTRA
+    params = {
+        "select": "id,score,article_count,source_count,"
+        "label,why_relevant_sv,llm_relevance",
+        "score": "not.is.null",
+        "article_count": "gt.0",
+        "order": "score.desc,id.asc",
+        "limit": str(page_size),
+    }
+    if labelled_only:
+        params["label"] = "not.is.null"
 
+    topics, skipped = [], []
+    for page in range(MAX_PAGES):
+        params["offset"] = str(page * page_size)
+        topic_rows = supabase_get(base_url, key, overview, params)
+        if topic_rows:
+            raw_topics = add_articles(base_url, key, articles_view, topic_rows)
+            found, missed = normalize_topics(
+                raw_topics, limit=top - len(topics), check=check
+            )
+            topics += found
+            skipped += missed
+        # Stop when enough topics are found, or when this was the last page
+        if len(topics) >= top or len(topic_rows) < page_size:
+            break
+    return topics, skipped
+
+
+def add_articles(
+    base_url: str, key: str, articles_view: str, topic_rows: list[dict]
+) -> list[dict]:
+    """Read the best articles for one page of topics and attach them.
+
+    Rows keep their order (by score); a topic without article rows gets an
+    empty list and is skipped by normalize_topic ("has no articles").
+    """
     ids = ",".join(str(row["id"]) for row in topic_rows)
     article_rows = supabase_get(
         base_url,
@@ -250,15 +349,77 @@ def load_supabase(top: int) -> list[dict]:
     by_topic: dict = {}
     for row in article_rows:
         by_topic.setdefault(row["topic_id"], []).append(row)
+    return [{**row, "articles": by_topic.get(row["id"], [])} for row in topic_rows]
 
-    topics = []
-    for row in topic_rows:
-        articles = by_topic.get(row["id"], [])
-        if not articles:
-            print(f"Skipped topic {row['id']}: no articles in '{articles_view}'.")
+
+# -------------------- saving labels (--save)
+
+
+class SaveError(Exception):
+    """Labels could not be saved for one topic. The message is written for the user."""
+
+
+def supabase_patch(
+    base_url: str, key: str, table: str, topic_id: int, values: dict
+) -> None:
+    """Update one row in `table` through the Supabase REST API.
+
+    Asks Supabase to return the updated row, so that "0 rows updated"
+    (for example a wrong id) is reported instead of passing silently.
+    """
+    query = urlencode({"id": f"eq.{topic_id}", "select": "id"}, safe=".")
+    request = Request(
+        f"{base_url.rstrip('/')}/rest/v1/{table}?{query}",
+        data=json.dumps(values).encode("utf-8"),
+        method="PATCH",
+        headers={
+            "apikey": key,
+            "Content-Type": "application/json",
+            "Prefer": "return=representation",
+        },
+    )
+    try:
+        with urlopen(request, timeout=SUPABASE_TIMEOUT_SECONDS) as response:
+            rows = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        if error.code in (401, 403):
+            raise SaveError(
+                f"Supabase refused to update '{table}' (HTTP {error.code}). "
+                "Check SUPABASE_KEY and the UPDATE grant on label, "
+                "why_relevant_sv and llm_relevance (PR #39)."
+            ) from error
+        raise SaveError(
+            f"Supabase answered HTTP {error.code} when updating topic {topic_id}."
+        ) from error
+    except (URLError, OSError) as error:
+        raise SaveError(f"Could not reach Supabase ({error}).") from error
+    except json.JSONDecodeError as error:
+        raise SaveError("Supabase did not answer with JSON.") from error
+    if not isinstance(rows, list) or len(rows) != 1:
+        raise SaveError(f"topic {topic_id} was not updated (no matching row)")
+
+
+def save_labels(labels: dict, table: str) -> tuple[list, dict]:
+    """Save label, why_relevant_sv and llm_relevance for each labelled topic.
+
+    labels maps topic id -> {"label", "why_relevant_sv", "llm_relevance"}.
+    A failed topic is reported and the next one is saved.
+    Returns (saved topic ids, error messages by topic id).
+    """
+    base_url = os.getenv("SUPABASE_URL", "").strip()
+    key = os.getenv("SUPABASE_KEY", "").strip()
+    saved, errors = [], {}
+    for topic_id, result in labels.items():
+        values = {field: result[field] for field in LABEL_FIELDS}
+        try:
+            supabase_patch(base_url, key, table, topic_id, values)
+        except SaveError as error:
+            errors[topic_id] = str(error)
+            print(f"  NOT SAVED topic {topic_id}: {error}")
             continue
-        topics.append(normalize_topic({**row, "articles": articles}))
-    return topics
+        saved.append(topic_id)
+        print(f"  SAVED     topic {topic_id}")
+    return saved, errors
 
 
 def select_top(topics: list[dict], top: int) -> list[dict]:
@@ -372,14 +533,17 @@ def render_markdown(
     top: int,
     source: str,
     errors: dict | None = None,
+    skipped: list[dict] | None = None,
 ) -> str:
     """Write the top list as Markdown.
 
     labels maps topic id -> {"label", "why_relevant_sv", "llm_relevance"}.
     errors maps topic id -> error message for topics that failed.
+    skipped lists topics left out because of invalid data.
     Topics without labels get placeholders (used by --dry-run).
     """
     errors = errors or {}
+    skipped = skipped or []
     today = datetime.now().astimezone()
     lines = [
         f"# Topp {top} ämnen – {today:%Y-%m-%d}",
@@ -414,6 +578,9 @@ def render_markdown(
             )
     if errors:
         lines += ["", f'Misslyckade ämnen: {len(errors)} (se "Fel" ovan)']
+    if skipped:
+        lines += ["", f"Överhoppade ämnen (ogiltig data): {len(skipped)}"]
+        lines += [f"- Ämne-id {s['topic_id']}: {s['reason']}" for s in skipped]
     return "\n".join(lines) + "\n"
 
 
@@ -456,17 +623,34 @@ def main() -> None:
         action="store_true",
         help="Show prompts, list preview and cost estimate, no call to Claude",
     )
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Save label, why_relevant_sv and llm_relevance to topics "
+        "(needs --source supabase). Already labelled topics are not relabelled",
+    )
+    parser.add_argument(
+        "--relabel",
+        action="store_true",
+        help="With --save: label and save all listed topics again",
+    )
     args = parser.parse_args()
+    if args.save and args.source != "supabase":
+        parser.error("--save needs --source supabase")
+    if args.relabel and not args.save:
+        parser.error("--relabel only works together with --save")
 
     load_dotenv()
     model = os.getenv("CONTENT_WRITER_MODEL", "claude-sonnet-5-5")
     effort = os.getenv("CONTENT_WRITER_EFFORT", DEFAULT_EFFORT)
 
     try:
+        # Check the table name before any Claude call costs money
+        table = view_name("TOPICS_TABLE", DEFAULT_TOPICS_TABLE) if args.save else ""
         if args.source == "supabase":
-            topics = load_supabase(args.top)
+            topics, skipped = load_supabase(args.top)
         elif args.fixture.exists():
-            topics = load_fixture(args.fixture)
+            topics, skipped = load_fixture(args.fixture)
         else:
             sys.exit(f"Fixture not found: {args.fixture}")
     except ReadError as error:
@@ -474,31 +658,50 @@ def main() -> None:
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
         sys.exit(f"Could not read topics: {error}")
 
+    for item in skipped:
+        print(f"Skipped topic {item['topic_id']}: {item['reason']}")
     selected = select_top(topics, args.top)
     if not selected:
         sys.exit("No topics found.")
     if len(selected) < args.top:
         print(f"Only {len(selected)} topics available (asked for {args.top}).")
 
-    print(f"Model: {model} (effort: {effort})")
-    print(f"Topics: {len(selected)} (one Claude call each)")
+    # With --save, topics that already have labels are not paid for again
+    existing = {}
+    if args.save and not args.relabel:
+        for topic in selected:
+            if (found := existing_labels(topic)) is not None:
+                existing[topic["id"]] = found
+    to_label = [topic for topic in selected if topic["id"] not in existing]
+    if existing:
+        print(
+            f"Already labelled, not sent to Claude: {sorted(existing)} "
+            "(use --relabel to label them again)"
+        )
 
-    prompts = [build_prompt(topic) for topic in selected]
+    print(f"Model: {model} (effort: {effort})")
+    print(f"Topics: {len(to_label)} (one Claude call each)")
+
+    prompts = [build_prompt(topic) for topic in to_label]
     cost = estimate_run_cost(model, prompts)
 
     if args.dry_run:
         print("\n--- System prompt ---")
         print(SYSTEM_PROMPT)
-        for topic, prompt in zip(selected, prompts):
+        for topic, prompt in zip(to_label, prompts):
             print(f"\n--- Prompt for topic {topic['id']} ---")
             print(prompt)
         print("--- End of prompts ---\n")
         print(f"Estimated cost for {len(prompts)} calls: ~{format_cost(cost)}")
         if cost is not None and cost > MAX_COST_USD:
             print(f"Warning: above the limit of ${MAX_COST_USD:.2f} per run.")
-        print("Dry run: no call to Claude made.\n")
-        print("--- Preview of the list ---\n")
-        print(render_markdown(selected, {}, args.top, args.source))
+        print("Dry run: no call to Claude made.")
+        if args.save:
+            print("Dry run: nothing written to Supabase.")
+        print("\n--- Preview of the list ---\n")
+        print(
+            render_markdown(selected, existing, args.top, args.source, skipped=skipped)
+        )
         return
 
     if cost is None or cost > MAX_COST_USD:
@@ -506,19 +709,31 @@ def main() -> None:
             f"Estimated cost {format_cost(cost)} is above the limit of "
             f"${MAX_COST_USD:.2f} per run (or unknown). Use a smaller --top."
         )
-    print(f"Estimated cost: ~{format_cost(cost)}")
-    print("Labelling topics:")
-    labels, errors, real_cost = label_topics(selected, prompts, model, effort)
-
-    print(
-        f"Labelled: {len(labels)} of {len(selected)} | Cost: {format_cost(real_cost)}"
-    )
-    if not labels:
+    labels, errors, real_cost = {}, {}, 0.0
+    if to_label:
+        print(f"Estimated cost: ~{format_cost(cost)}")
+        print("Labelling topics:")
+        labels, errors, real_cost = label_topics(to_label, prompts, model, effort)
+        print(
+            f"Labelled: {len(labels)} of {len(to_label)}"
+            f" | Cost: {format_cost(real_cost)}"
+        )
+    else:
+        print("Nothing to label: every topic in the list already has labels.")
+    if not labels and not existing:
         sys.exit("No topic was labelled, so nothing was saved.")
     if errors:
         print(f"Failed topics: {sorted(errors)} (marked in the list)")
 
-    text = render_markdown(selected, labels, args.top, args.source, errors)
+    if args.save and labels:
+        print(f"Saving labels to '{table}':")
+        saved, save_errors = save_labels(labels, table)
+        print(f"Saved to Supabase: {len(saved)} of {len(labels)}")
+        if save_errors:
+            print(f"Not saved: {sorted(save_errors)} (labels are still in the list)")
+
+    all_labels = {**existing, **labels}
+    text = render_markdown(selected, all_labels, args.top, args.source, errors, skipped)
     path = save_list(text, args.top, model, real_cost)
     print("\n" + text)
     print(f"Saved to: {path}")

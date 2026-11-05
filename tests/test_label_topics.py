@@ -8,16 +8,22 @@ import pytest
 from content_tools import ClaudeError
 from src.label_topics import (
     DEFAULT_FIXTURE,
+    FETCH_EXTRA,
+    MAX_PAGES,
     ReadError,
+    SaveError,
     build_prompt,
     estimate_run_cost,
+    existing_labels,
     load_fixture,
     load_supabase,
     main,
     normalize_topic,
+    normalize_topics,
     parse_label_reply,
     render_markdown,
     select_top,
+    supabase_patch,
 )
 
 GOOD_REPLY = (
@@ -44,9 +50,10 @@ def make_topic(topic_id, score, n_articles=3, **extra):
 
 
 def test_sample_fixture_loads_with_required_fields():
-    topics = load_fixture(DEFAULT_FIXTURE)
+    topics, skipped = load_fixture(DEFAULT_FIXTURE)
 
     assert len(topics) == 6
+    assert skipped == []
     for topic in topics:
         assert 1 <= len(topic["articles"]) <= 3
         for article in topic["articles"]:
@@ -98,9 +105,47 @@ def test_top_n_skips_topics_without_articles_before_the_limit(tmp_path):
     path = tmp_path / "topics.json"
     path.write_text(json.dumps({"topics": topics}), encoding="utf-8")
 
-    selected = select_top(load_fixture(path), 2)
+    topics, skipped = load_fixture(path)
+    selected = select_top(topics, 2)
 
     assert [t["id"] for t in selected] == [2, 4]
+    assert skipped == []
+
+
+def test_invalid_topic_is_skipped_and_reported_not_fatal(tmp_path):
+    broken_article = make_topic(2, 0.95)
+    broken_article["articles"][1]["title"] = ""
+    no_score = make_topic(3, 0.90)
+    del no_score["score"]
+    null_score = make_topic(5, None)
+    topics = [
+        make_topic(1, 0.99),
+        broken_article,
+        no_score,
+        make_topic(4, 0.80),
+        null_score,
+    ]
+    path = tmp_path / "topics.json"
+    path.write_text(json.dumps({"topics": topics}), encoding="utf-8")
+
+    valid, skipped = load_fixture(path)
+
+    assert [t["id"] for t in valid] == [1, 4]
+    assert [s["topic_id"] for s in skipped] == [2, 3, 5]
+    assert skipped[0]["reason"] == "article in topic 2 has no 'title'"
+    assert "missing 'score'" in skipped[1]["reason"]
+
+
+def test_normalize_topics_stops_at_limit_without_reporting_later_topics():
+    bad = make_topic(3, 0.5)
+    bad["articles"][0]["link"] = ""
+    raw = [make_topic(1, 0.9), bad, make_topic(2, 0.8), make_topic(4, 0.4)]
+    raw.append({**make_topic(5, 0.3), "articles": []})
+
+    valid, skipped = normalize_topics(raw, limit=2)
+
+    assert [t["id"] for t in valid] == [1, 2]
+    assert [s["topic_id"] for s in skipped] == [3]
 
 
 @pytest.mark.parametrize("field", ["id", "score", "articles"])
@@ -275,9 +320,7 @@ def test_dry_run_reports_fewer_topics_than_asked(monkeypatch, capsys):
 
 def test_broken_fixture_stops_with_clear_message(tmp_path, monkeypatch):
     path = tmp_path / "topics.json"
-    broken = make_topic(1, 0.5)
-    del broken["score"]
-    path.write_text(json.dumps({"topics": [broken]}), encoding="utf-8")
+    path.write_text(json.dumps({"no_topics_key": []}), encoding="utf-8")
     monkeypatch.setattr(
         "sys.argv", ["label_topics.py", "--fixture", str(path), "--dry-run"]
     )
@@ -286,6 +329,41 @@ def test_broken_fixture_stops_with_clear_message(tmp_path, monkeypatch):
         main()
 
     assert "Could not read topics" in str(stopped.value)
+
+
+def test_dry_run_reports_skipped_topic_and_continues(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "topics.json"
+    broken = make_topic(1, 0.9)
+    broken["articles"][0]["source"] = ""
+    path.write_text(
+        json.dumps({"topics": [broken, make_topic(2, 0.5)]}), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["label_topics.py", "--fixture", str(path), "--dry-run"]
+    )
+
+    main()
+
+    out = capsys.readouterr().out
+    assert "Skipped topic 1: article in topic 1 has no 'source'" in out
+    assert "Prompt for topic 2" in out
+    assert "Överhoppade ämnen (ogiltig data): 1" in out
+    assert "- Ämne-id 1: article in topic 1 has no 'source'" in out
+
+
+def test_all_topics_skipped_stops_with_no_topics(tmp_path, monkeypatch):
+    path = tmp_path / "topics.json"
+    broken = make_topic(1, 0.9)
+    broken["articles"][0]["link"] = ""
+    path.write_text(json.dumps({"topics": [broken]}), encoding="utf-8")
+    monkeypatch.setattr(
+        "sys.argv", ["label_topics.py", "--fixture", str(path), "--dry-run"]
+    )
+
+    with pytest.raises(SystemExit) as stopped:
+        main()
+
+    assert "No topics found" in str(stopped.value)
 
 
 # -------------------- real run (Claude is always mocked)
@@ -417,9 +495,7 @@ def fake_urlopen(answers, requests):
     return call
 
 
-def test_supabase_reads_topics_then_their_top_three_articles(
-    supabase_env, monkeypatch, capsys
-):
+def test_supabase_reads_topics_then_their_top_three_articles(supabase_env, monkeypatch):
     requests = []
     monkeypatch.setattr(
         "src.label_topics.urlopen",
@@ -429,14 +505,14 @@ def test_supabase_reads_topics_then_their_top_three_articles(
         ),
     )
 
-    topics = load_supabase(top=3)
+    topics, skipped = load_supabase(top=3)
 
     assert [t["id"] for t in topics] == [5, 8]
+    assert skipped == [{"topic_id": 9, "reason": "topic 9 has no articles"}]
     assert [a["news_id"] for a in topics[0]["articles"]] == [101, 102]
     assert topics[0]["articles"][0]["description"] == ""
     assert topics[0]["article_count"] == 4
     assert topics[1]["articles"][0]["news_id"] == 101
-    assert "Skipped topic 9: no articles" in capsys.readouterr().out
 
     first, second = (parse_qs(urlparse(r.full_url).query) for r in requests)
     assert requests[0].full_url.startswith(
@@ -445,11 +521,44 @@ def test_supabase_reads_topics_then_their_top_three_articles(
     assert first["order"] == ["score.desc,id.asc"]
     assert first["score"] == ["not.is.null"]
     assert first["article_count"] == ["gt.0"]
-    assert first["limit"] == ["3"]
+    assert first["limit"] == [str(3 + FETCH_EXTRA)]
+    assert first["offset"] == ["0"]
     assert second["topic_id"] == ["in.(5,8,9)"]
     assert second["rank_in_topic"] == ["lte.3"]
     assert requests[0].get_method() == "GET"
     assert requests[0].get_header("Apikey") == "test-key"
+
+
+def test_supabase_skipped_topics_do_not_reduce_the_result_below_n(
+    supabase_env, monkeypatch
+):
+    overview = [
+        {"id": i, "score": 1 - i / 100, "article_count": 2, "source_count": 2}
+        for i in range(1, 9)
+    ]
+    articles = [
+        {
+            "topic_id": i,
+            "news_id": i * 10,
+            "title": f"Title {i}",
+            "source": "A",
+            # topics 2 and 3 have an article without link
+            "link": "" if i in (2, 3) else f"https://example.com/{i}",
+            "description": "",
+            "rank_in_topic": 1,
+        }
+        for i in range(1, 9)
+    ]
+    monkeypatch.setattr(
+        "src.label_topics.urlopen",
+        fake_urlopen({"topic_overview": overview, "topic_top_articles": articles}, []),
+    )
+
+    topics, skipped = load_supabase(top=5)
+
+    assert [t["id"] for t in topics] == [1, 4, 5, 6, 7]
+    assert [s["topic_id"] for s in skipped] == [2, 3]
+    assert skipped[0]["reason"] == "article in topic 2 has no 'link'"
 
 
 def test_supabase_sends_secret_key_only_in_apikey_header(supabase_env, monkeypatch):
@@ -483,7 +592,8 @@ def test_supabase_view_names_come_from_environment(supabase_env, monkeypatch):
         ),
     )
 
-    assert [t["id"] for t in load_supabase(top=1)] == [5]
+    topics, _ = load_supabase(top=1)
+    assert [t["id"] for t in topics] == [5]
     assert "/rest/v1/ranked_topics?" in requests[0].full_url
     assert "/rest/v1/ranked_articles?" in requests[1].full_url
 
@@ -494,7 +604,7 @@ def test_supabase_with_no_ranked_topics_reads_no_articles(supabase_env, monkeypa
         "src.label_topics.urlopen", fake_urlopen({"topic_overview": []}, requests)
     )
 
-    assert load_supabase(top=20) == []
+    assert load_supabase(top=20) == ([], [])
     assert len(requests) == 1
 
 
@@ -565,3 +675,419 @@ def test_main_dry_run_with_supabase_source(supabase_env, monkeypatch, capsys):
     assert "Källa: supabase" in out
     assert "(news_id 102)" in out
     assert "Only 2 topics available (asked for 3)." in out
+
+
+# -------------------- saving labels (--save, Supabase is always mocked)
+
+LABELLED_OVERVIEW = [
+    # Topic 5 already has labels, topic 8 has none
+    {
+        "id": 5,
+        "score": 0.9,
+        "article_count": 4,
+        "source_count": 3,
+        "label": "Sparad rubrik",
+        "why_relevant_sv": "Sparad motivering.",
+        "llm_relevance": 3,
+    },
+    {
+        "id": 8,
+        "score": 0.7,
+        "article_count": 1,
+        "source_count": 1,
+        "label": None,
+        "why_relevant_sv": None,
+        "llm_relevance": None,
+    },
+]
+
+
+def fake_supabase(answers, requests):
+    """Like fake_urlopen, but an answer may be a function of the request."""
+
+    def call(request, timeout):
+        requests.append(request)
+        name = urlparse(request.full_url).path.rsplit("/", 1)[-1]
+        answer = answers[name]
+        if callable(answer):
+            answer = answer(request)
+        if isinstance(answer, Exception):
+            raise answer
+        return io.BytesIO(json.dumps(answer).encode("utf-8"))
+
+    return call
+
+
+def updated_row(request):
+    """Supabase answer to a PATCH with return=representation: the updated id."""
+    topic_id = int(parse_qs(urlparse(request.full_url).query)["id"][0][3:])
+    return [{"id": topic_id}]
+
+
+def patches(requests):
+    return [r for r in requests if r.get_method() == "PATCH"]
+
+
+def save_run(monkeypatch, tmp_path, argv, topics_answer=updated_row, replies=None):
+    """Run main() against mocked Supabase and Claude. Returns all requests."""
+    requests = []
+    monkeypatch.setattr("src.label_topics.OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(
+        "src.label_topics.urlopen",
+        fake_supabase(
+            {
+                "topic_overview": LABELLED_OVERVIEW,
+                "topic_top_articles": ARTICLE_ROWS,
+                "topics": topics_answer,
+            },
+            requests,
+        ),
+    )
+    monkeypatch.setattr(
+        "src.label_topics.call_claude", fake_claude(replies or [GOOD_REPLY] * 5)
+    )
+    monkeypatch.setattr("sys.argv", ["label_topics.py", *argv])
+    main()
+    return requests
+
+
+def test_normalize_keeps_saved_labels():
+    topic = normalize_topic({**make_topic(1, 0.5), **LABELLED_OVERVIEW[0]})
+    assert existing_labels(topic) == {
+        "label": "Sparad rubrik",
+        "why_relevant_sv": "Sparad motivering.",
+        "llm_relevance": 3,
+    }
+    assert existing_labels(normalize_topic(make_topic(2, 0.5))) is None
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"label": " "}, {"why_relevant_sv": None}, {"llm_relevance": True}],
+)
+def test_incomplete_saved_labels_count_as_missing(changes):
+    topic = {**LABELLED_OVERVIEW[0], **changes}
+    assert existing_labels(topic) is None
+
+
+def test_supabase_reads_saved_labels(supabase_env, monkeypatch):
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen",
+        fake_supabase(
+            {"topic_overview": LABELLED_OVERVIEW, "topic_top_articles": ARTICLE_ROWS},
+            requests,
+        ),
+    )
+
+    topics, _ = load_supabase(top=2)
+
+    select = parse_qs(urlparse(requests[0].full_url).query)["select"][0]
+    assert "label,why_relevant_sv,llm_relevance" in select
+    assert topics[0]["label"] == "Sparad rubrik"
+    assert topics[1]["label"] is None
+
+
+def test_save_skips_labelled_topics_and_saves_only_new_labels(
+    supabase_env, monkeypatch, tmp_path, capsys
+):
+    requests = save_run(
+        monkeypatch, tmp_path, ["--source", "supabase", "--top", "2", "--save"]
+    )
+
+    out = capsys.readouterr().out
+    assert "Already labelled, not sent to Claude: [5]" in out
+    assert "Topics: 1 (one Claude call each)" in out
+    assert "Saved to Supabase: 1 of 1" in out
+
+    (patch,) = patches(requests)
+    assert urlparse(patch.full_url).path == "/rest/v1/topics"
+    assert parse_qs(urlparse(patch.full_url).query) == {
+        "id": ["eq.8"],
+        "select": ["id"],
+    }
+    # Only the three label columns are sent, nothing about score or status
+    assert json.loads(patch.data) == {
+        "label": "Ny AI-vägledning",
+        "why_relevant_sv": "Viktigt för småföretag.",
+        "llm_relevance": 4,
+    }
+    assert patch.get_header("Prefer") == "return=representation"
+    assert patch.get_header("Content-type") == "application/json"
+
+    # The list shows both the saved and the new label
+    text = next(tmp_path.glob("top2_*.md")).read_text(encoding="utf-8")
+    assert "## 1. Sparad rubrik" in text
+    assert "## 2. Ny AI-vägledning" in text
+
+
+def test_save_sends_secret_key_only_in_apikey_header(
+    supabase_env, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("SUPABASE_KEY", "sb_secret_test123")
+    requests = save_run(
+        monkeypatch, tmp_path, ["--source", "supabase", "--top", "2", "--save"]
+    )
+
+    for request in requests:
+        assert request.get_header("Apikey") == "sb_secret_test123"
+        assert not request.has_header("Authorization")
+        assert "sb_secret" not in request.full_url
+
+
+def test_relabel_labels_and_saves_every_topic(
+    supabase_env, monkeypatch, tmp_path, capsys
+):
+    requests = save_run(
+        monkeypatch,
+        tmp_path,
+        ["--source", "supabase", "--top", "2", "--save", "--relabel"],
+    )
+
+    assert "Topics: 2 (one Claude call each)" in capsys.readouterr().out
+    ids = [parse_qs(urlparse(r.full_url).query)["id"] for r in patches(requests)]
+    assert ids == [["eq.5"], ["eq.8"]]
+
+
+def test_nothing_to_label_makes_no_claude_call_and_no_write(
+    supabase_env, monkeypatch, tmp_path, capsys
+):
+    labelled = {**LABELLED_OVERVIEW[1], **existing_labels(LABELLED_OVERVIEW[0])}
+    requests = []
+    monkeypatch.setattr("src.label_topics.OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(
+        "src.label_topics.urlopen",
+        fake_supabase(
+            {
+                "topic_overview": [LABELLED_OVERVIEW[0], labelled],
+                "topic_top_articles": ARTICLE_ROWS,
+            },
+            requests,
+        ),
+    )
+    monkeypatch.setattr("src.label_topics.call_claude", fake_claude([]))
+    monkeypatch.setattr(
+        "sys.argv", ["label_topics.py", "--source", "supabase", "--save"]
+    )
+
+    main()
+
+    assert "Nothing to label" in capsys.readouterr().out
+    assert patches(requests) == []
+    assert len(list(tmp_path.glob("top20_*.md"))) == 1
+
+
+def test_dry_run_with_save_writes_nothing(supabase_env, monkeypatch, tmp_path, capsys):
+    requests = save_run(
+        monkeypatch,
+        tmp_path,
+        ["--source", "supabase", "--top", "2", "--save", "--dry-run"],
+        replies=[],
+    )
+
+    out = capsys.readouterr().out
+    assert "Dry run: nothing written to Supabase." in out
+    assert "Prompt for topic 8" in out
+    assert "Prompt for topic 5" not in out
+    assert patches(requests) == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_failed_save_is_reported_and_next_topic_is_saved(
+    supabase_env, monkeypatch, tmp_path, capsys
+):
+    def first_fails(request):
+        if "eq.5" in request.full_url:
+            return HTTPError("u", 403, "Forbidden", {}, None)
+        return updated_row(request)
+
+    requests = save_run(
+        monkeypatch,
+        tmp_path,
+        ["--source", "supabase", "--top", "2", "--save", "--relabel"],
+        topics_answer=first_fails,
+    )
+
+    out = capsys.readouterr().out
+    assert "NOT SAVED topic 5: Supabase refused to update 'topics' (HTTP 403)" in out
+    assert "UPDATE grant" in out
+    assert "SAVED     topic 8" in out
+    assert "Saved to Supabase: 1 of 2" in out
+    assert len(patches(requests)) == 2
+    assert len(list(tmp_path.glob("top2_*.md"))) == 1
+
+
+@pytest.mark.parametrize(
+    ("answer", "message"),
+    [
+        ([], "was not updated"),
+        (HTTPError("u", 400, "Bad Request", {}, None), "HTTP 400"),
+        (URLError("no network"), "Could not reach Supabase"),
+    ],
+)
+def test_supabase_patch_errors_have_clear_messages(monkeypatch, answer, message):
+    monkeypatch.setattr(
+        "src.label_topics.urlopen", fake_supabase({"topics": answer}, [])
+    )
+
+    with pytest.raises(SaveError, match=message):
+        supabase_patch("https://p.supabase.co", "key", "topics", 7, {"label": "x"})
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["--save"], "--save needs --source supabase"),
+        (["--source", "supabase", "--relabel"], "--relabel only works together"),
+    ],
+)
+def test_invalid_flag_combinations_stop(monkeypatch, capsys, argv, message):
+    monkeypatch.setattr("sys.argv", ["label_topics.py", *argv])
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert message in capsys.readouterr().err
+
+
+def test_unsafe_table_name_stops_before_any_request(supabase_env, monkeypatch):
+    monkeypatch.setenv("TOPICS_TABLE", "topics; drop")
+    requests = []
+    monkeypatch.setattr("src.label_topics.urlopen", fake_supabase({}, requests))
+    monkeypatch.setattr(
+        "sys.argv", ["label_topics.py", "--source", "supabase", "--save"]
+    )
+
+    with pytest.raises(SystemExit) as stopped:
+        main()
+
+    assert "TOPICS_TABLE is not a valid view name" in str(stopped.value)
+    assert requests == []
+
+
+def test_supabase_reads_all_topics_unless_labelled_only(supabase_env, monkeypatch):
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen",
+        fake_supabase(
+            {"topic_overview": OVERVIEW_ROWS, "topic_top_articles": ARTICLE_ROWS},
+            requests,
+        ),
+    )
+
+    load_supabase(top=2)
+    load_supabase(top=2, labelled_only=True)
+
+    first, _, third, _ = (parse_qs(urlparse(r.full_url).query) for r in requests)
+    assert "label" not in first
+    assert third["label"] == ["not.is.null"]
+
+
+# -------------------- reading page by page (Mathias, #42)
+
+
+def paged_supabase(overview_rows, article_rows, requests):
+    """Mock Supabase that honours limit, offset and topic_id=in.(...)."""
+
+    def call(request, timeout):
+        requests.append(request)
+        query = parse_qs(urlparse(request.full_url).query)
+        view = urlparse(request.full_url).path.rsplit("/", 1)[-1]
+        if view == "topic_overview":
+            offset, limit = int(query["offset"][0]), int(query["limit"][0])
+            rows = overview_rows[offset : offset + limit]
+        else:
+            ids = {int(i) for i in query["topic_id"][0][4:-1].split(",")}
+            rows = [row for row in article_rows if row["topic_id"] in ids]
+        return io.BytesIO(json.dumps(rows).encode("utf-8"))
+
+    return call
+
+
+def many_topics(count, invalid):
+    """`count` topics in score order; topics with id in `invalid` lack a link."""
+    overview = [
+        {"id": i, "score": 1 - i / 1000, "article_count": 1, "source_count": 1}
+        for i in range(1, count + 1)
+    ]
+    articles = [
+        {
+            "topic_id": i,
+            "news_id": i * 10,
+            "title": f"Title {i}",
+            "source": "A",
+            "link": "" if i in invalid else f"https://example.com/{i}",
+            "description": "",
+            "rank_in_topic": 1,
+        }
+        for i in range(1, count + 1)
+    ]
+    return overview, articles
+
+
+def overview_offsets(requests):
+    return [
+        parse_qs(urlparse(r.full_url).query)["offset"][0]
+        for r in requests
+        if "/topic_overview?" in r.full_url
+    ]
+
+
+def test_more_skipped_topics_than_one_page_still_give_top_n(supabase_env, monkeypatch):
+    # 20 invalid topics at the top: more than FETCH_EXTRA (10) can replace
+    overview, articles = many_topics(40, invalid=set(range(1, 21)))
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen", paged_supabase(overview, articles, requests)
+    )
+
+    topics, skipped = load_supabase(top=5)
+
+    assert [t["id"] for t in topics] == [21, 22, 23, 24, 25]
+    assert len(skipped) == 20
+    page_size = 5 + FETCH_EXTRA
+    assert overview_offsets(requests) == ["0", str(page_size)]
+
+
+def test_reading_stops_when_the_candidates_run_out(supabase_env, monkeypatch):
+    overview, articles = many_topics(18, invalid=set(range(1, 16)))
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen", paged_supabase(overview, articles, requests)
+    )
+
+    topics, skipped = load_supabase(top=5)
+
+    # Only 3 valid topics exist: the second page is short, so reading stops
+    assert [t["id"] for t in topics] == [16, 17, 18]
+    assert len(skipped) == 15
+    assert overview_offsets(requests) == ["0", "15"]
+
+
+def test_reading_stops_at_the_page_limit(supabase_env, monkeypatch):
+    monkeypatch.setattr("src.label_topics.MAX_PAGES", 2)
+    overview, articles = many_topics(100, invalid=set(range(1, 101)))
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen", paged_supabase(overview, articles, requests)
+    )
+
+    topics, skipped = load_supabase(top=5)
+
+    assert topics == []
+    assert len(skipped) == 2 * (5 + FETCH_EXTRA)
+    assert overview_offsets(requests) == ["0", "15"]
+    assert MAX_PAGES == 20
+
+
+def test_check_can_skip_a_topic():
+    def no_topic_2(topic):
+        if topic["id"] == 2:
+            raise ValueError("topic 2 cannot be sent")
+
+    raw = [make_topic(1, 0.9), make_topic(2, 0.8), make_topic(3, 0.7)]
+
+    valid, skipped = normalize_topics(raw, limit=2, check=no_topic_2)
+
+    assert [t["id"] for t in valid] == [1, 3]
+    assert skipped == [{"topic_id": 2, "reason": "topic 2 cannot be sent"}]

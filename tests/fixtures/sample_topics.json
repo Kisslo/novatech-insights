@@ -1,11 +1,14 @@
 {
-  "_comment": "Example ranked topics for #27. Fictional articles (example.com). Same fields as the planned read interface in #26: topic id, score, article_count, source_count and up to 3 articles per topic in rank order. Articles follow the agreed top-3 rule: with description first, max one per source, newest, news_id ascending (dates are not part of the read interface, so the date order is assumed).",
+  "_comment": "Example ranked topics for #27. Fictional articles (example.com). Same fields as the planned read interface in #26: topic id, score, article_count, source_count and up to 3 articles per topic in rank order. Articles follow the agreed top-3 rule: with description first, max one per source, newest, news_id ascending (dates are not part of the read interface, so the date order is assumed). Topics 101-105 have example labels for the Telegram API (#42); topic 106 has none, to test that unlabelled topics are left out.",
   "topics": [
     {
       "id": 101,
       "score": 0.91,
       "article_count": 7,
       "source_count": 4,
+      "label": "EU ger småföretag vägledning om AI-förordningen",
+      "why_relevant_sv": "Små företag får tydligare besked om vilka krav i AI-förordningen som gäller dem, till exempel att tala om när kunder pratar med en chattbot.",
+      "llm_relevance": 5,
       "articles": [
         {
           "news_id": 1001,
@@ -35,6 +38,9 @@
       "score": 0.84,
       "article_count": 5,
       "source_count": 3,
+      "label": "Redovisningsbyråer testar AI-agenter för fakturor & bokslut",
+      "why_relevant_sv": "Byråer som låter AI matcha fakturor mot betalningar rapporterar färre manuella timmar – en tidig signal för hela branschen.",
+      "llm_relevance": 5,
       "articles": [
         {
           "news_id": 1011,
@@ -64,6 +70,9 @@
       "score": 0.77,
       "article_count": 4,
       "source_count": 2,
+      "label": "Ideella föreningar och AI: stöd för ansökningar, oro för data",
+      "why_relevant_sv": "Föreningar kan spara tid på bidragsansökningar, men behöver ha koll på var medlemsdata hamnar.",
+      "llm_relevance": 4,
       "articles": [
         {
           "news_id": 1021,
@@ -86,6 +95,9 @@
       "score": 0.69,
       "article_count": 3,
       "source_count": 1,
+      "label": "Öppen AI-modell som fungerar på en vanlig laptop",
+      "why_relevant_sv": "Lokala modeller kan låta småföretag använda AI utan att skicka data till molnet.",
+      "llm_relevance": 3,
       "articles": [
         {
           "news_id": 1031,
@@ -99,6 +111,9 @@
     {
       "id": 105,
       "score": 0.62,
+      "label": "Skatteverket testar AI-assistent i kundtjänsten",
+      "why_relevant_sv": "När myndigheter börjar använda AI påverkar det hur redovisningsbyråer och deras kunder får svar.",
+      "llm_relevance": 4,
       "articles": [
         {
           "news_id": 1041,

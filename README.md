@@ -616,6 +616,7 @@ of why the topic matters (`why_relevant_sv`) and a relevance rating from
 uv run python src/label_topics.py --top 5 --dry-run
 uv run python src/label_topics.py --top 5
 uv run python src/label_topics.py --source supabase --top 20 --dry-run
+uv run python src/label_topics.py --source supabase --top 20 --save
 ```
 
 - `--source fixture` (default) reads `tests/fixtures/sample_topics.json`.
@@ -623,21 +624,48 @@ uv run python src/label_topics.py --source supabase --top 20 --dry-run
   Their names are set in `.env` with `TOPICS_OVERVIEW_VIEW`
   (default `topic_overview`) and `TOPICS_ARTICLES_VIEW`
   (default `topic_top_articles`). The views are part of issue #26.
-  This script only reads Supabase; it does not write to it.
+  Without `--save`, Supabase is only read.
 - `--top` sets the number of topics (default 20, e.g. 5 for Telegram).
 - `--dry-run` shows the prompts, a preview of the list and the estimated
   cost without calling Claude. It does not need `ANTHROPIC_API_KEY`.
   With `--source fixture`, no API credentials are needed.
   With `--source supabase`, `SUPABASE_URL` and `SUPABASE_KEY` are
-  still required to read the database.
+  still required to read the database. Nothing is written.
+- `--save` (only with `--source supabase`, issue #42) writes `label`,
+  `why_relevant_sv` and `llm_relevance` to the `topics` table
+  (`TOPICS_TABLE` in `.env`). Topics that already have all three values
+  are not sent to Claude again. Nothing else in `topics` is changed.
+- `--relabel` (with `--save`) labels and saves every listed topic again.
 
 A real run makes one Claude call per topic and needs `ANTHROPIC_API_KEY`
 in `.env`. It stops before any call if the estimated cost is above
 0.5 USD. A topic that fails is reported in the terminal and in the list,
-and the run continues with the next topic.
+and the run continues with the next topic. A topic with invalid data
+(for example an article without title, source or link) is skipped and
+reported; with `--source supabase` more topics are read page by page until
+`--top` valid topics are found or the candidates run out (at most 20 pages),
+so this does not make the list shorter than `--top`. If saving fails for one
+topic, it is reported and the next topic is saved.
 
 The list is saved in `output/top<N>_<date>_<time>.md`, which is ignored
 by Git. Each topic shows its rank, label, score, number of sources and
 articles, AI relevance and up to three article links with their `news_id`.
-Labels are not yet written back to the `topics` table; that waits for
-team approval.
+
+`--save` needs UPDATE permission on `topics.label`, `why_relevant_sv` and
+`llm_relevance` for the backend key (granted in `sql/006_topic_backend_permissions.sql`).
+
+## Telegram API
+
+`src/telegram_api.py` is a small FastAPI app that n8n calls to get the
+top topics as ready-to-send Telegram messages with the buttons **Skriv**
+and **Skippa** (issue #42). It only reads labelled topics and never calls
+Claude. The message text is built by `src/telegram_format.py`.
+
+```powershell
+uv run uvicorn telegram_api:app --app-dir src --port 8000
+```
+
+Requests need the header `X-API-Key` with `TELEGRAM_API_KEY` from `.env`.
+`TELEGRAM_SOURCE` chooses `fixture` (default) or `supabase`.
+See [docs/telegram-api.md](docs/telegram-api.md) for the response format,
+errors, the tunnel used during development and the n8n settings.

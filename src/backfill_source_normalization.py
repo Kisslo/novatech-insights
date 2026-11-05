@@ -56,12 +56,11 @@ def request_json(url, key, method="GET", payload=None):
 
 
 def equality_filter(value):
-    """Build a quoted PostgREST equality filter, including NULL."""
+    """Build a PostgREST equality filter, including NULL."""
     if value is None:
         return "is.null"
 
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'eq."{escaped}"'
+    return f"eq.{value}"
 
 
 def validate_article(article, previous_id):

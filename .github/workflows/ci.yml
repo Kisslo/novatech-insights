@@ -200,3 +200,19 @@ jobs:
               psql -X -U postgres -d "$test_database" \
               -v ON_ERROR_STOP=1 < sql/test_required_source_normalization.sql
           done
+      - name: Test topic status and Telegram posts
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          for test_database in novatech_test novatech_permissions_test
+          do
+            echo "Applying topic status and posts to $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/008_create_topic_status_and_posts.sql
+
+            echo "Testing topic status and posts in $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/test_topic_status_and_posts.sql
+          done

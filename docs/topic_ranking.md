@@ -221,3 +221,63 @@ requested. Offset pagination can still observe duplicates, omissions, or
 inconsistent snapshots if rows are inserted or removed during the run; live
 execution should therefore use a stable dataset or rerun after concurrent
 changes.
+
+## Running the Supabase adapter
+
+The adapter requires these environment variables:
+
+- `SUPABASE_URL`: the Supabase project URL.
+- `SUPABASE_KEY`: a server-side backend key with the permissions described
+  below. Keep this key private.
+
+They can be placed in the project's local `.env` file. The adapter loads that
+file when it is run as a script. Do not commit `.env` or expose
+`SUPABASE_KEY` to client-side code.
+
+The default command is read-only:
+
+```bash
+uv run --locked python src/rank_topics_supabase.py
+```
+
+It reads and calculates rankings but does not update the database. To
+explicitly save results:
+
+```bash
+uv run --locked python src/rank_topics_supabase.py --write
+```
+
+With `--write`, the adapter updates only these four fields in `topics`,
+together for each topic:
+
+- `score`
+- `score_calculated_at`
+- `score_version`
+- `score_breakdown`
+
+### Database prerequisites
+
+Before live ranking, apply the existing topic-storage migrations in order:
+
+1. `sql/002_create_topic_storage.sql`
+2. `sql/003_create_topics_and_links.sql`
+3. `sql/004_create_topic_read_views.sql`
+4. `sql/005_save_topic_group.sql`
+5. `sql/006_topic_backend_permissions.sql`
+
+Migration 006 provides the backend `service_role` access needed by the
+adapter: read access to `news`, `topics`, `topic_articles` and the topic read
+views, plus update access to the four ranking fields. `service_role` bypasses
+RLS but still requires these SQL grants. The role and live REST access must be
+verified in the target Supabase project; local SQL permission tests do not
+prove live API access.
+
+Existing articles must first be normalized and verified using the repository's
+source-key backfill. Complete and verify that backfill before applying
+`sql/007_require_normalized_sources.sql`. In particular, confirm that the
+required `source_normalized` values are present and that the NULL-count query
+returns zero. Migration 007 must not be applied before this verified backfill.
+
+After migration 007, verify the live API reads and the backend update
+permissions before enabling `--write`. The ranking adapter does not perform
+the backfill and does not repair source-normalization mismatches.

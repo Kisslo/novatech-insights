@@ -642,8 +642,9 @@ in `.env`. It stops before any call if the estimated cost is above
 0.5 USD. A topic that fails is reported in the terminal and in the list,
 and the run continues with the next topic. A topic with invalid data
 (for example an article without title, source or link) is skipped and
-reported; with `--source supabase` a few extra topics are read, so this
-does not make the list shorter than `--top`. If saving fails for one
+reported; with `--source supabase` more topics are read page by page until
+`--top` valid topics are found or the candidates run out (at most 20 pages),
+so this does not make the list shorter than `--top`. If saving fails for one
 topic, it is reported and the next topic is saved.
 
 The list is saved in `output/top<N>_<date>_<time>.md`, which is ignored

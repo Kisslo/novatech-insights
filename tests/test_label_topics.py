@@ -9,6 +9,7 @@ from content_tools import ClaudeError
 from src.label_topics import (
     DEFAULT_FIXTURE,
     FETCH_EXTRA,
+    MAX_PAGES,
     ReadError,
     SaveError,
     build_prompt,
@@ -521,6 +522,7 @@ def test_supabase_reads_topics_then_their_top_three_articles(supabase_env, monke
     assert first["score"] == ["not.is.null"]
     assert first["article_count"] == ["gt.0"]
     assert first["limit"] == [str(3 + FETCH_EXTRA)]
+    assert first["offset"] == ["0"]
     assert second["topic_id"] == ["in.(5,8,9)"]
     assert second["rank_in_topic"] == ["lte.3"]
     assert requests[0].get_method() == "GET"
@@ -979,3 +981,113 @@ def test_supabase_reads_all_topics_unless_labelled_only(supabase_env, monkeypatc
     first, _, third, _ = (parse_qs(urlparse(r.full_url).query) for r in requests)
     assert "label" not in first
     assert third["label"] == ["not.is.null"]
+
+
+# -------------------- reading page by page (Mathias, #42)
+
+
+def paged_supabase(overview_rows, article_rows, requests):
+    """Mock Supabase that honours limit, offset and topic_id=in.(...)."""
+
+    def call(request, timeout):
+        requests.append(request)
+        query = parse_qs(urlparse(request.full_url).query)
+        view = urlparse(request.full_url).path.rsplit("/", 1)[-1]
+        if view == "topic_overview":
+            offset, limit = int(query["offset"][0]), int(query["limit"][0])
+            rows = overview_rows[offset : offset + limit]
+        else:
+            ids = {int(i) for i in query["topic_id"][0][4:-1].split(",")}
+            rows = [row for row in article_rows if row["topic_id"] in ids]
+        return io.BytesIO(json.dumps(rows).encode("utf-8"))
+
+    return call
+
+
+def many_topics(count, invalid):
+    """`count` topics in score order; topics with id in `invalid` lack a link."""
+    overview = [
+        {"id": i, "score": 1 - i / 1000, "article_count": 1, "source_count": 1}
+        for i in range(1, count + 1)
+    ]
+    articles = [
+        {
+            "topic_id": i,
+            "news_id": i * 10,
+            "title": f"Title {i}",
+            "source": "A",
+            "link": "" if i in invalid else f"https://example.com/{i}",
+            "description": "",
+            "rank_in_topic": 1,
+        }
+        for i in range(1, count + 1)
+    ]
+    return overview, articles
+
+
+def overview_offsets(requests):
+    return [
+        parse_qs(urlparse(r.full_url).query)["offset"][0]
+        for r in requests
+        if "/topic_overview?" in r.full_url
+    ]
+
+
+def test_more_skipped_topics_than_one_page_still_give_top_n(supabase_env, monkeypatch):
+    # 20 invalid topics at the top: more than FETCH_EXTRA (10) can replace
+    overview, articles = many_topics(40, invalid=set(range(1, 21)))
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen", paged_supabase(overview, articles, requests)
+    )
+
+    topics, skipped = load_supabase(top=5)
+
+    assert [t["id"] for t in topics] == [21, 22, 23, 24, 25]
+    assert len(skipped) == 20
+    page_size = 5 + FETCH_EXTRA
+    assert overview_offsets(requests) == ["0", str(page_size)]
+
+
+def test_reading_stops_when_the_candidates_run_out(supabase_env, monkeypatch):
+    overview, articles = many_topics(18, invalid=set(range(1, 16)))
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen", paged_supabase(overview, articles, requests)
+    )
+
+    topics, skipped = load_supabase(top=5)
+
+    # Only 3 valid topics exist: the second page is short, so reading stops
+    assert [t["id"] for t in topics] == [16, 17, 18]
+    assert len(skipped) == 15
+    assert overview_offsets(requests) == ["0", "15"]
+
+
+def test_reading_stops_at_the_page_limit(supabase_env, monkeypatch):
+    monkeypatch.setattr("src.label_topics.MAX_PAGES", 2)
+    overview, articles = many_topics(100, invalid=set(range(1, 101)))
+    requests = []
+    monkeypatch.setattr(
+        "src.label_topics.urlopen", paged_supabase(overview, articles, requests)
+    )
+
+    topics, skipped = load_supabase(top=5)
+
+    assert topics == []
+    assert len(skipped) == 2 * (5 + FETCH_EXTRA)
+    assert overview_offsets(requests) == ["0", "15"]
+    assert MAX_PAGES == 20
+
+
+def test_check_can_skip_a_topic():
+    def no_topic_2(topic):
+        if topic["id"] == 2:
+            raise ValueError("topic 2 cannot be sent")
+
+    raw = [make_topic(1, 0.9), make_topic(2, 0.8), make_topic(3, 0.7)]
+
+    valid, skipped = normalize_topics(raw, limit=2, check=no_topic_2)
+
+    assert [t["id"] for t in valid] == [1, 3]
+    assert skipped == [{"topic_id": 2, "reason": "topic 2 cannot be sent"}]

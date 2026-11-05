@@ -64,8 +64,9 @@ Example from `tests/fixtures/sample_topics.json` with `n=1`:
 | `skipped` | Topics left out because of invalid data, as `{"topic_id", "reason"}`. Useful for monitoring |
 
 A topic with an invalid article (missing title, source or link) is skipped
-and reported in `skipped`; the API reads a few extra topics so that this does
-not make the answer shorter than `n`.
+and reported in `skipped`. With Supabase the API keeps reading the next page
+of topics until `n` messages are found or the candidates run out (at most 20
+pages), so skipped topics do not make the answer shorter than `n`.
 
 ### Errors
 

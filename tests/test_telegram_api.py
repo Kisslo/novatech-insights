@@ -157,8 +157,14 @@ def supabase(monkeypatch):
         fake.requests.append(request)
         if fake.error is not None:
             raise fake.error
+        query = parse_qs(urlparse(request.full_url).query)
         view = urlparse(request.full_url).path.rsplit("/", 1)[-1]
-        rows = fake.overview if view == "topic_overview" else fake.articles
+        if view == "topic_overview":
+            offset, limit = int(query["offset"][0]), int(query["limit"][0])
+            rows = fake.overview[offset : offset + limit]
+        else:
+            ids = {int(i) for i in query["topic_id"][0][4:-1].split(",")}
+            rows = [row for row in fake.articles if row["topic_id"] in ids]
         return io.BytesIO(json.dumps(rows).encode("utf-8"))
 
     monkeypatch.setattr("label_topics.urlopen", call)
@@ -219,3 +225,20 @@ def test_answers_never_contain_keys(supabase):
     assert response.status_code == 200
     assert API_KEY not in response.text
     assert SUPABASE_KEY not in response.text
+
+
+def test_many_invalid_topics_still_give_five_messages(supabase):
+    # 12 topics at the top cannot be sent: 6 lack a link, 6 have a bad rating
+    supabase.overview = [overview_row(i, 1 - i / 1000) for i in range(1, 31)]
+    for row in supabase.overview[6:12]:
+        row["llm_relevance"] = 9
+    supabase.articles = [
+        article_row(i, link="" if i <= 6 else f"https://example.com/{i}")
+        for i in range(1, 31)
+    ]
+
+    body = get_top().json()
+
+    assert body["count"] == 5
+    assert [t["topic_id"] for t in body["topics"]] == [13, 14, 15, 16, 17]
+    assert [s["topic_id"] for s in body["skipped"]] == list(range(1, 13))

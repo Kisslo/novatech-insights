@@ -38,7 +38,6 @@ load_dotenv()
 
 MAX_TOPICS = 20
 DEFAULT_TOPICS = 5
-FORMAT_EXTRA = 5  # extra topics read in case a topic cannot be formatted
 MIN_KEY_LENGTH = 32
 SOURCES = ("fixture", "supabase")
 
@@ -69,20 +68,30 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
+def check_message(topic: dict) -> None:
+    """Raise ValueError if the topic cannot become a Telegram message."""
+    format_topic(topic, rank=1)
+
+
 def read_labelled_topics(source: str, count: int) -> tuple[list[dict], list[dict]]:
-    """Labelled topics, highest score first, plus topics skipped as invalid."""
+    """Labelled topics, highest score first, plus topics skipped as invalid.
+
+    Supabase: reads page by page until `count` topics that can be formatted
+    are found or the candidates run out. Fixture: all labelled topics (the
+    file is small), and the caller stops after `count` messages.
+    """
     if source == "supabase":
-        return load_supabase(count, labelled_only=True)
+        return load_supabase(count, labelled_only=True, check=check_message)
     topics, skipped = load_fixture(DEFAULT_FIXTURE)
     labelled = [topic for topic in topics if existing_labels(topic) is not None]
-    return select_top(labelled, count), skipped
+    return select_top(labelled, len(labelled)), skipped
 
 
 @app.get("/telegram/top", dependencies=[Depends(require_api_key)])
 def telegram_top(n: int = Query(DEFAULT_TOPICS, ge=1, le=MAX_TOPICS)) -> dict:
     """The top n labelled topics as Telegram messages with Skriv/Skippa buttons.
 
-    A topic that cannot be formatted is reported in "skipped"; a few extra
+    A topic that cannot be formatted is reported in "skipped", and more
     topics are read so that it does not make the answer shorter than n.
     """
     source = os.getenv("TELEGRAM_SOURCE", "fixture").strip()
@@ -90,7 +99,7 @@ def telegram_top(n: int = Query(DEFAULT_TOPICS, ge=1, le=MAX_TOPICS)) -> dict:
         logger.error("TELEGRAM_SOURCE must be fixture or supabase, not %r", source)
         raise HTTPException(status_code=500, detail="Server is not configured")
     try:
-        topics, skipped = read_labelled_topics(source, n + FORMAT_EXTRA)
+        topics, skipped = read_labelled_topics(source, n)
     except ReadError as error:
         # The details stay in the server log; n8n only gets a short message.
         logger.error("Could not read topics: %s", error)

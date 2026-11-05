@@ -1,0 +1,12 @@
+{
+  "half_life_days": 3,
+  "default_source_weight": 1.0,
+  "previous_days": 6,
+  "max_breadth_bonus": 1.0,
+  "breadth_scale": 3.0,
+  "max_velocity_bonus": 1.0,
+  "velocity_scale": 5.0,
+  "swedish_weight": 0.5,
+  "score_version": "preliminary-v2",
+  "source_weights": {}
+}

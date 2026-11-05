@@ -174,3 +174,50 @@ Each returned topic contains:
 - `config`: `half_life_days`, `default_source_weight`, `previous_days`, `future_tolerance_seconds`, `source_weights`, and `swedish_sources`.
 
 Individual article contributions use `news_id` to identify the input article. They include `source_weight`, `time_weight`, and `contribution`.
+
+## Configuration and Supabase adapter
+
+The first integration uses [`config/ranking.json`](../config/ranking.json) for
+the adjustable ranking settings. Its defaults preserve the values above,
+including `previous_days = 6` and an empty `source_weights` object. An empty
+source-weight mapping means that every source uses the default weight `1.0`.
+
+The adapter in `src/rank_topics_supabase.py` reads all rows from `topics`,
+`topic_articles`, and `news` with stable offset pagination. It uses every
+article linked through `topic_articles`; `topic_top_articles` is a
+presentation view and is not used for ranking. Article IDs from `news.id` are
+retained in the ranking input and breakdown.
+
+Swedish sources are derived at runtime from rows in the shared
+`data/sources.csv` registry whose `language` is `sv`. This is a source-based
+signal using the registry's language marker, not an assessment of an
+individual article's geographic relevance. Source matching uses the shared
+`normalize_source()` function.
+
+The adapter validates the complete read before any write. It uses one
+timezone-aware `now` for the whole run. Without `--write`, it is read-only.
+With explicit `--write`, it updates only `score`, `score_calculated_at`,
+`score_version`, and `score_breakdown`, one topic at a time. A topic with no
+valid articles has those fields cleared to `NULL`. An unexpected calculation
+error leaves that topic's previous result untouched. Read failures abort before
+any update; isolated topic and write failures are reported in the run summary.
+
+The adapter depends on the schema and permissions from PR #39. Live execution
+also requires the migrations to be applied and a server-side key with the
+appropriate backend permissions. Local tests use mocked API responses only.
+
+At the adapter boundary, ranking receives a separate article representation:
+`source` contains `normalize_source(source)`, while the original article,
+including `news.id` and stored source values, is not modified. A non-NULL
+`source_normalized` must match the calculated identity; a mismatch aborts before
+writing. A NULL stored value is allowed, but is reported as a warning.
+Normalization affects source breadth and therefore can change the final score
+when spelling, case, or whitespace variants of one source are merged into one
+identity.
+
+Pagination continues until an empty page, rather than treating a short page as
+the end. This handles APIs that impose a smaller server-side page size than
+requested. Offset pagination can still observe duplicates, omissions, or
+inconsistent snapshots if rows are inserted or removed during the run; live
+execution should therefore use a stable dataset or rerun after concurrent
+changes.

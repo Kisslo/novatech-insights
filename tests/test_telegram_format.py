@@ -18,6 +18,7 @@ from telegram_format import (
 def make_topic(**changes):
     topic = {
         "id": 101,
+        "score": 0.91,
         "label": "EU ger småföretag vägledning om AI-förordningen",
         "why_relevant_sv": "Små företag får tydligare besked om kraven.",
         "llm_relevance": 4,
@@ -88,7 +89,7 @@ def test_format_topic_builds_text_and_buttons():
     assert message["text"].startswith(
         "<b>1. EU ger småföretag vägledning om AI-förordningen</b>"
     )
-    assert "Källor: 4 · Artiklar: 7 · AI-relevans: 4/5" in message["text"]
+    assert "Poäng: 0.91 · Källor: 4 · Artiklar: 7 · AI-relevans: 4/5" in message["text"]
     assert (
         '• <a href="https://example.com/a">EU publishes guidance</a>'
         " – Example Tech News"
@@ -103,6 +104,28 @@ def test_format_topic_builds_text_and_buttons():
 def test_counts_from_articles_are_shown_as_at_least():
     text = format_topic(make_topic(counts_from_articles=True), 1)["text"]
     assert "Källor: minst 4 · Artiklar: minst 7" in text
+
+
+@pytest.mark.parametrize(
+    "score, expected",
+    [(0.91, "0.91"), (0, "0.00"), (0.0, "0.00"), (12.3456, "12.35"), (3, "3.00")],
+)
+def test_score_is_shown_with_two_decimals(score, expected):
+    text = format_topic(make_topic(score=score), 1)["text"]
+    assert f"Poäng: {expected} · Källor: 4" in text
+
+
+@pytest.mark.parametrize("score", [None, "0.91", True, float("nan"), float("inf")])
+def test_topic_without_usable_score_raises(score):
+    with pytest.raises(ValueError, match="score"):
+        format_topic(make_topic(score=score), 1)
+
+
+def test_topic_with_missing_score_raises():
+    topic = make_topic()
+    del topic["score"]
+    with pytest.raises(ValueError, match="has no score"):
+        format_topic(topic, 1)
 
 
 def test_non_web_link_is_not_clickable():

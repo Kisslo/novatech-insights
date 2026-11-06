@@ -11,11 +11,12 @@ Limits from the Telegram Bot API:
 - callback_data on a button is at most 64 bytes
 
 Input (one topic, same fields as label_topics.normalize_topic() plus labels):
-    {"id": 101, "label": "...", "why_relevant_sv": "...", "llm_relevance": 4,
+    {"id": 101, "score": 0.91, "label": "...", "why_relevant_sv": "...", "llm_relevance": 4,
      "article_count": 7, "source_count": 4, "counts_from_articles": False,
      "articles": [{"title": "...", "source": "...", "link": "https://..."}]}
 """
 
+import math
 from urllib.parse import urlparse
 
 MAX_MESSAGE_CHARS = 4096
@@ -80,6 +81,18 @@ def check_labels(topic: dict) -> None:
         raise ValueError(f"topic {topic.get('id')} has llm_relevance {relevance}")
 
 
+def check_score(topic: dict) -> None:
+    """Raise ValueError if the topic has no usable ranking score.
+
+    0 is a valid score. None, text, True/False, NaN and infinity are not.
+    """
+    score = topic.get("score")
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        raise ValueError(f"topic {topic.get('id')} has no score")
+    if not math.isfinite(score):
+        raise ValueError(f"topic {topic.get('id')} has score {score}")
+
+
 def format_text(topic: dict, rank: int) -> str:
     """Telegram HTML text: rank + headline, why it matters, counts, top links.
 
@@ -92,7 +105,8 @@ def format_text(topic: dict, rank: int) -> str:
         "",
         escape_html(shorten(topic["why_relevant_sv"], MAX_WHY_CHARS)),
         "",
-        f"Källor: {prefix}{topic['source_count']}"
+        f"Poäng: {topic['score']:.2f}"
+        f" · Källor: {prefix}{topic['source_count']}"
         f" · Artiklar: {prefix}{topic['article_count']}"
         f" · AI-relevans: {topic['llm_relevance']}/5",
         "",
@@ -114,10 +128,10 @@ def format_text(topic: dict, rank: int) -> str:
 def format_topic(topic: dict, rank: int) -> dict:
     """One labelled topic -> one ready-to-send Telegram message.
 
-    Raises ValueError if the topic is not labelled or the message would
-    break a Telegram limit. The caller skips and reports such topics.
-    """
+    Raises ValueError if the topic is not labelled, has no score, or the
+    message would break a Telegram limit. The caller skips and reports such topics."""
     check_labels(topic)
+    check_score(topic)
     buttons = [
         {"text": WRITE_TEXT, "callback_data": callback_data(WRITE_PREFIX, topic["id"])},
         {"text": SKIP_TEXT, "callback_data": callback_data(SKIP_PREFIX, topic["id"])},

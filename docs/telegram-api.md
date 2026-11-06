@@ -42,7 +42,7 @@ Example from `tests/fixtures/sample_topics.json` with `n=1`:
     {
       "topic_id": 101,
       "rank": 1,
-      "text": "<b>1. EU ger småföretag vägledning om AI-förordningen</b>\n\nSmå företag får tydligare besked om vilka krav i AI-förordningen som gäller dem, till exempel att tala om när kunder pratar med en chattbot.\n\nKällor: 4 · Artiklar: 7 · AI-relevans: 5/5\n\n• <a href=\"https://example.com/tech/eu-ai-act-guidance-small-business\">EU publishes guidance for small businesses under the AI Act</a> – Example Tech News\n• <a href=\"https://example.com/affarer/ai-forordningen-smaforetag\">Nya regler för AI: det här gäller för småföretag</a> – Exempel Affärer\n• <a href=\"https://example.com/policy/ai-act-chatbot-transparency\">AI Act: transparency rules for chatbots explained</a> – Example Policy Weekly",
+      "text": "<b>1. EU ger småföretag vägledning om AI-förordningen</b>\n\nSmå företag får tydligare besked om vilka krav i AI-förordningen som gäller dem, till exempel att tala om när kunder pratar med en chattbot.\n\nPoäng: 0.91 · Källor: 4 · Artiklar: 7 · AI-relevans: 5/5\n\n• <a href=\"https://example.com/tech/eu-ai-act-guidance-small-business\">EU publishes guidance for small businesses under the AI Act</a> – Example Tech News\n• <a href=\"https://example.com/affarer/ai-forordningen-smaforetag\">Nya regler för AI: det här gäller för småföretag</a> – Exempel Affärer\n• <a href=\"https://example.com/policy/ai-act-chatbot-transparency\">AI Act: transparency rules for chatbots explained</a> – Example Policy Weekly",
       "parse_mode": "HTML",
       "buttons": [
         {"text": "Skriv", "callback_data": "write:101"},

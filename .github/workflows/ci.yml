@@ -216,3 +216,30 @@ jobs:
               psql -X -U postgres -d "$test_database" \
               -v ON_ERROR_STOP=1 < sql/test_topic_status_and_posts.sql
           done
+
+      - name: Test source registry and seed
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          for test_database in novatech_test novatech_permissions_test
+          do
+            echo "Applying source registry to $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/009_create_source_registry.sql
+
+            echo "Testing source registry in $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/test_source_registry.sql
+
+            echo "Seeding source registry in $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/seed_source_registry.sql
+
+            echo "Repeating seed in $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/seed_source_registry.sql
+          done

@@ -1,6 +1,5 @@
--- Draft source registry for authority-weight storage.
--- Categories and weights remain NULL until agreed.
--- This migration does not change ranking behavior.
+-- Source registry for source-type-based ranking.
+-- Ranking parameters belong in the ranking configuration.
 -- Existing article and feed tables are preserved.
 
 BEGIN;
@@ -9,7 +8,6 @@ CREATE TABLE public.source_registry (
     source_normalized text COLLATE "C" PRIMARY KEY,
     name text NOT NULL,
     source_type text,
-    authority_weight double precision,
 
     CONSTRAINT source_registry_key_not_blank
         CHECK (source_normalized ~ '[^[:space:]]'),
@@ -17,27 +15,14 @@ CREATE TABLE public.source_registry (
     CONSTRAINT source_registry_name_not_blank
         CHECK (name ~ '[^[:space:]]'),
 
-    CONSTRAINT source_registry_type_not_blank
-        CHECK (
-            source_type IS NULL
-            OR source_type ~ '[^[:space:]]'
-        ),
-
-    CONSTRAINT source_registry_weight_valid
-        CHECK (
-            authority_weight IS NULL
-            OR (
-                authority_weight >= 0
-                AND authority_weight < 'Infinity'::double precision
-            )
-        )
+    CONSTRAINT source_registry_type_allowed
+        CHECK (source_type IN ('media', 'authority'))
 );
 
 ALTER TABLE public.source_registry ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE public.source_registry FROM PUBLIC;
 
--- Remove automatic application-role grants.
 -- Backend access is read-only; administrators maintain the registry.
 DO $permissions$
 DECLARE
@@ -67,9 +52,9 @@ END;
 $permissions$;
 
 COMMENT ON TABLE public.source_registry IS
-'Source metadata for future ranking integration.
-Creating this registry does not change the current ranking configuration.
-Source categories and weights require team agreement.';
+'Source metadata for source-type-based ranking.
+Ranking parameters are defined in configuration, not per source here.
+Classification criteria and process require team agreement.';
 
 COMMENT ON COLUMN public.source_registry.source_normalized IS
 'Comparison key generated using the shared Python normalize_source helper.
@@ -80,12 +65,7 @@ COMMENT ON COLUMN public.source_registry.name IS
 'Source display name. Does not replace existing news.source values.';
 
 COMMENT ON COLUMN public.source_registry.source_type IS
-'Optional source category. NULL means not classified.
-Allowed categories have not yet been agreed.';
-
-COMMENT ON COLUMN public.source_registry.authority_weight IS
-'Optional finite, non-negative source weight. Zero is allowed.
-NULL means no weight has been assigned.
-Ranking fallback and precedence rules require a separate integration.';
+'media or authority. NULL means not yet classified.
+Do not infer classifications before the criteria are agreed.';
 
 COMMIT;

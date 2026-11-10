@@ -2,7 +2,7 @@
 -- Existing registry entries are preserved.
 -- Test locally before applying to shared Supabase.
 
-BEGIN;
+
 
 INSERT INTO public.source_registry (source_normalized, name)
 VALUES
@@ -37,5 +37,3 @@ VALUES
     ('unite.ai', 'Unite.AI'),
     ('wired', 'WIRED')
 ON CONFLICT (source_normalized) DO NOTHING;
-
-COMMIT;

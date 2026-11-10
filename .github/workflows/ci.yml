@@ -233,13 +233,15 @@ jobs:
               psql -X -U postgres -d "$test_database" \
               -v ON_ERROR_STOP=1 < sql/test_source_registry.sql
 
-            echo "Seeding source registry in $test_database"
-            docker exec -i "$TEST_CONTAINER" \
-              psql -X -U postgres -d "$test_database" \
-              -v ON_ERROR_STOP=1 < sql/seed_source_registry.sql
+            docker cp sql/seed_source_registry.sql \
+              "$TEST_CONTAINER:/tmp/seed_source_registry.sql"
 
-            echo "Repeating seed in $test_database"
-            docker exec -i "$TEST_CONTAINER" \
+            docker cp sql/test_source_registry_seed.sql \
+              "$TEST_CONTAINER:/tmp/test_source_registry_seed.sql"
+
+            echo "Testing repeated seed and preservation in $test_database"
+            docker exec "$TEST_CONTAINER" \
               psql -X -U postgres -d "$test_database" \
-              -v ON_ERROR_STOP=1 < sql/seed_source_registry.sql
+              -v ON_ERROR_STOP=1 \
+              -f /tmp/test_source_registry_seed.sql
           done

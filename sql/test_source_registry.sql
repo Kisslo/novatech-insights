@@ -4,7 +4,7 @@ BEGIN;
 
 DO $tests$
 DECLARE
-    invalid_weight double precision;
+    invalid_type text;
     role_name text;
 BEGIN
     -- Unclassified sources are allowed.
@@ -13,14 +13,13 @@ BEGIN
     )
     VALUES ('__registry_test__', 'Registry Test');
 
-    -- Zero and positive weights are allowed.
+    -- Both agreed categories must work.
     UPDATE public.source_registry
-    SET authority_weight = 0
+    SET source_type = 'media'
     WHERE source_normalized = '__registry_test__';
 
     UPDATE public.source_registry
-    SET source_type = 'test_category',
-        authority_weight = 1.5
+    SET source_type = 'authority'
     WHERE source_normalized = '__registry_test__';
 
     -- Duplicate source keys must fail.
@@ -58,42 +57,43 @@ BEGIN
         WHEN check_violation THEN NULL;
     END;
 
-    -- Blank categories must fail.
-    BEGIN
-        UPDATE public.source_registry
-        SET source_type = E' \t\n'
-        WHERE source_normalized = '__registry_test__';
-
-        RAISE EXCEPTION 'FAIL: blank category accepted';
-    EXCEPTION
-        WHEN check_violation THEN NULL;
-    END;
-
-    -- Negative and non-finite weights must fail.
-    FOREACH invalid_weight IN ARRAY ARRAY[
-        -1::double precision,
-        'NaN'::double precision,
-        'Infinity'::double precision,
-        '-Infinity'::double precision
+    -- Categories outside the agreed values must fail.
+    FOREACH invalid_type IN ARRAY ARRAY[
+        '',
+        E' \t\n',
+        'test_category',
+        'MEDIA',
+        'government',
+        ' authority '
     ]
     LOOP
         BEGIN
             UPDATE public.source_registry
-            SET authority_weight = invalid_weight
+            SET source_type = invalid_type
             WHERE source_normalized = '__registry_test__';
 
             RAISE EXCEPTION
-                'FAIL: invalid weight accepted: %', invalid_weight;
+                'FAIL: invalid category accepted: %', invalid_type;
         EXCEPTION
             WHEN check_violation THEN NULL;
         END;
     END LOOP;
 
-    -- Unassigned values remain allowed.
+    -- A source can return to unclassified.
     UPDATE public.source_registry
-    SET source_type = NULL,
-        authority_weight = NULL
+    SET source_type = NULL
     WHERE source_normalized = '__registry_test__';
+
+    -- Per-source weights must not be stored here.
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'source_registry'
+          AND column_name = 'authority_weight'
+    ) THEN
+        RAISE EXCEPTION 'FAIL: authority_weight column still exists';
+    END IF;
 
     -- RLS must be enabled.
     IF NOT (

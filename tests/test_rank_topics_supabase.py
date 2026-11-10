@@ -18,6 +18,9 @@ CONFIG = {
     "half_life_days": 3,
     "default_source_weight": 1.0,
     "previous_days": 6,
+    "authority_base_factor": 1.5,
+    "authority_total_start_factor": 10.0,
+    "authority_bonus_half_life_days": 0.7,
 }
 NOW = datetime(2026, 11, 5, 12, tzinfo=timezone.utc)
 
@@ -48,6 +51,10 @@ def rows():
                 "published": "not-a-date",
                 "link": "https://example.test/102",
             },
+        ],
+        "source_registry": [
+            {"source_normalized": "breakit", "source_type": "media"},
+            {"source_normalized": "reuters", "source_type": None},
         ],
     }
 
@@ -102,6 +109,7 @@ def test_normalized_ranking_copy_merges_variants_without_mutating_input(monkeypa
             "source_normalized": "breakit",
         }
     )
+    data["source_registry"][0]["source_type"] = "authority"
     original = deepcopy(data["news"])
     calls = []
     monkeypatch.setattr(adapter, "request_json", paged_request(data, calls))
@@ -336,3 +344,36 @@ def test_mismatched_stored_normalization_aborts_before_writing(monkeypatch):
             url="https://example.test", key="secret", write=True, now=NOW, config=CONFIG
         )
     assert not any(method == "PATCH" for method, _, _ in calls)
+
+
+def test_missing_registry_match_is_rankable_without_bonus(monkeypatch):
+    data = rows()
+    data["source_registry"] = []
+    calls = []
+    monkeypatch.setattr(adapter, "request_json", paged_request(data, calls))
+
+    result = adapter.run_ranking(
+        url="https://example.test", key="secret", now=NOW, config=CONFIG
+    )
+
+    assert result["errors"] == {}
+    assert (
+        result["topics"][0]["values"]["score_breakdown"]["metrics"][
+            "authority_article_score"
+        ]
+        == 0
+    )
+
+
+def test_registry_read_error_is_not_treated_as_unclassified(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        adapter,
+        "request_json",
+        paged_request(rows(), calls, fail_table="source_registry"),
+    )
+
+    with pytest.raises(adapter.SupabaseReadError):
+        adapter.run_ranking(
+            url="https://example.test", key="secret", now=NOW, config=CONFIG
+        )

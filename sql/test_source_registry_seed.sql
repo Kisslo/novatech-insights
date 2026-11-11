@@ -12,6 +12,7 @@ VALUES
     ('ai business', 'AI Business', 'media'),
     ('ars technica', 'Ars Technica', 'authority')
 ON CONFLICT (source_normalized)
+
 DO UPDATE SET source_type = EXCLUDED.source_type;
 
 -- Remember every existing entry before seeding.
@@ -60,10 +61,12 @@ DECLARE
         'the new stack',
         'the register',
         'unite.ai',
-        'wired'
+        'wired',
+        'european commission digital strategy',
+        'imy'
     ];
 BEGIN
-    -- All 30 expected comparison keys must exist.
+    -- All 32 expected comparison keys must exist.
     IF EXISTS (
         SELECT 1
         FROM unnest(expected_sources) AS expected(source_key)

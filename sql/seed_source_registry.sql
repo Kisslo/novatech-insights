@@ -35,5 +35,7 @@ VALUES
     ('the new stack', 'The New Stack'),
     ('the register', 'The Register'),
     ('unite.ai', 'Unite.AI'),
-    ('wired', 'WIRED')
+    ('wired', 'WIRED'),
+    ('european commission digital strategy', 'European Commission Digital Strategy'),
+    ('imy', 'IMY')
 ON CONFLICT (source_normalized) DO NOTHING;

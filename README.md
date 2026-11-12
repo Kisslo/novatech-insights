@@ -60,9 +60,6 @@ Proposed scope:
 Stretch goal: complete an initial successful retrieval of a
 news article from a selected source.
 
-The scope and acceptance criteria for successful retrieval
-need to be defined before the test is carried out.
-
 ### By the End of Week 2
 
 - At least 30 news sources.
@@ -92,41 +89,25 @@ publish content.
 ## Status
 
 News collection, CSV classification, Supabase news uploading,
-semantic grouping, topic summaries and topic-label output have
-implementations in the repository.
+semantic grouping, topic storage with read views and backend
+permissions, topic summaries, topic labels and the top-N list,
+and the Telegram API have implementations in the repository.
+Topic storage and its permissions were merged in PR #39.
 
-Draft PR #39 adds topic storage, read views, optional group saving
-and shared backend permissions. Local and CI tests cover these
-changes, but migrations 002–006 have not been applied to Supabase.
+The source registry `public.source_registry` with `source_type`
+classification (`media`, `authority` or NULL) was added in PR #56.
+Topic ranking supports source-type-based authority weighting.
 
-Live grouping-to-ranking-to-reader integration and deployment
-verification remain pending.
+None of migrations 002–009 have been verified as applied to the
+shared Supabase project. Live grouping-to-ranking-to-reader
+integration and deployment verification remain pending.
 
 See [the data contract](docs/article-data-contract.md) and
 [verification results](docs/topic-storage-verification.md)
 for the current implementation scope and limitations.
 
-## Proposed Initial Grouping Test
-
-The initial proposal grouped news items based on their titles.
-
-Its proposed core fields were:
-
-- title
-- link
-- source
-- publication_date
-
-The implemented article contract uses `published` for the
-publication timestamp. Semantic grouping now uses article titles
-and RSS descriptions.
-
-The initial title-only proposal is historical context, not the
-current grouping implementation.
-
 ## Open Questions
 
-- Selection of tools, services, and integrations.
 - Storage and handling of generated content.
 - Documentation of priority search phrases and services.
 - Topic identity, regrouping and retirement of older groups.
@@ -443,6 +424,31 @@ uv run --locked ruff check .
 ```
 
 ## Topic Ranking
+
+Topics are scored from their articles using source weights, time
+decay, source breadth, velocity and a Swedish-source signal, and
+ranked through the shared calculation in `src/rank_topics.py`.
+Sources classified as `authority` in `public.source_registry` get a
+higher base weight plus a temporary start bonus with its own
+half-life. Media, unclassified and missing sources are ranked with
+the ordinary calculation.
+
+The Supabase adapter `src/rank_topics_supabase.py` reads topics,
+topic articles, news and the source registry, and can save the
+resulting scores back to the database:
+
+```powershell
+uv run python src/rank_topics_supabase.py
+uv run python src/rank_topics_supabase.py --write
+```
+
+Without `--write`, the run only reads and prints rankings. With
+`--write`, only `score`, `score_calculated_at`, `score_version` and
+`score_breakdown` are updated in `topics`. Parameters are configured
+in `config/ranking.json`.
+
+The model trained on Kisslo's ratings is still planned; the current
+ranking uses the configured rule-based calculation.
 
 For details on how topic scores are calculated, see
 [Topic ranking](docs/topic_ranking.md).

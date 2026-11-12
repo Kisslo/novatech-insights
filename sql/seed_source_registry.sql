@@ -37,5 +37,7 @@ VALUES
     ('unite.ai', 'Unite.AI'),
     ('wired', 'WIRED'),
     ('european commission digital strategy', 'European Commission Digital Strategy'),
-    ('imy', 'IMY')
+       ('imy', 'IMY'),
+    ('cert-se', 'CERT-SE'),
+    ('european data protection board', 'European Data Protection Board')
 ON CONFLICT (source_normalized) DO NOTHING;

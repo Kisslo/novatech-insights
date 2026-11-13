@@ -60,8 +60,8 @@ Full-article fetching and the complete pipeline remain unverified.
 - Other sources remain unchanged.
 - Repeating classification is safe.
 
-Mathias confirmed the authority classification for EU Digital Strategy
-and IMY. CERT-SE and EDPB are proposed additions for review in PR #61.
+Mathias approved all four sources and their authority classifications
+in PR #61.
 
 ## Local tests
 
@@ -77,7 +77,8 @@ The updated tests passed in novatech_source_registry_test:
 
 All temporary test records and classifications were rolled back.
 CI is configured to run both tests in both SQL test databases.
-The latest revised changes still need commit, push and CI verification.
+The implementation changes were committed and pushed in 9ca4b52.
+All three CI checks passed on that commit.
 
 ## Shared deployment plan
 

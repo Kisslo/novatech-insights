@@ -7,6 +7,9 @@
   "max_velocity_bonus": 1.0,
   "velocity_scale": 5.0,
   "swedish_weight": 0.5,
+  "authority_base_factor": 1.5,
+  "authority_total_start_factor": 10.0,
+  "authority_bonus_half_life_days": 0.7,
   "score_version": "preliminary-v2",
   "source_weights": {}
 }

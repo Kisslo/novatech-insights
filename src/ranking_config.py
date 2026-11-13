@@ -23,18 +23,24 @@ _NUMERIC_FIELDS = (
     "max_velocity_bonus",
     "velocity_scale",
     "swedish_weight",
+    "authority_base_factor",
+    "authority_total_start_factor",
+    "authority_bonus_half_life_days",
 )
 _POSITIVE_FIELDS = (
     "half_life_days",
     "previous_days",
     "breadth_scale",
     "velocity_scale",
+    "authority_bonus_half_life_days",
 )
 _NON_NEGATIVE_FIELDS = (
     "default_source_weight",
     "max_breadth_bonus",
     "max_velocity_bonus",
     "swedish_weight",
+    "authority_base_factor",
+    "authority_total_start_factor",
 )
 _SOURCE_FIELDS = {"name", "feed_url", "language"}
 
@@ -66,6 +72,10 @@ def validate_ranking_config(config):
     for field in _NON_NEGATIVE_FIELDS:
         if config[field] < 0:
             raise ValueError(f"{field} must not be negative.")
+    if config["authority_base_factor"] > config["authority_total_start_factor"]:
+        raise ValueError(
+            "authority_base_factor must not exceed authority_total_start_factor."
+        )
     source_weights = config.get("source_weights", {})
     if not isinstance(source_weights, dict):
         raise ValueError("source_weights must be an object.")

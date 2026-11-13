@@ -140,23 +140,66 @@ def get_source_weight(source, source_weights, default_weight=1.0):
 
 
 def calculate_article_contribution(
-    article, now, source_weights, half_life_days=3, default_weight=1.0
+    article,
+    now,
+    source_weights,
+    half_life_days=3,
+    default_weight=1.0,
+    *,
+    authority_base_factor=1.5,
+    authority_total_start_factor=10.0,
+    authority_bonus_half_life_days=0.7,
 ):
+    if authority_base_factor < 0 or authority_total_start_factor < 0:
+        raise ValueError("authority factors must not be negative")
+    if authority_base_factor > authority_total_start_factor:
+        raise ValueError(
+            "authority_base_factor must not exceed authority_total_start_factor"
+        )
+    if authority_bonus_half_life_days <= 0:
+        raise ValueError("authority_bonus_half_life_days must be greater than zero")
     published = get_effective_publication_time(article.get("published"), now)
     age_days = (now - published).total_seconds() / 86400
     source_weight = get_source_weight(
         article.get("source"), source_weights, default_weight
     )
     time_weight = calculate_time_decay(age_days, half_life_days)
+    source_type = article.get("source_type")
+    authority_bonus_decay = 0.0
+    authority_bonus = 0.0
+    authority_base_weight = source_weight
+    if source_type == "authority":
+        authority_base_weight = source_weight * authority_base_factor
+        authority_bonus_decay = calculate_time_decay(
+            age_days, authority_bonus_half_life_days
+        )
+        authority_bonus = (
+            source_weight
+            * (authority_total_start_factor - authority_base_factor)
+            * authority_bonus_decay
+        )
+    contribution = (authority_base_weight + authority_bonus) * time_weight
     return {
         "source_weight": source_weight,
         "time_weight": time_weight,
-        "contribution": source_weight * time_weight,
+        "source_type": source_type,
+        "authority_base_weight": authority_base_weight,
+        "authority_bonus": authority_bonus,
+        "authority_bonus_time_weight": authority_bonus_decay,
+        "contribution": contribution,
     }
 
 
 def calculate_topic_article_score(
-    articles, now, source_weights, half_life_days=3, default_weight=1.0
+    articles,
+    now,
+    source_weights,
+    half_life_days=3,
+    default_weight=1.0,
+    *,
+    authority_base_factor=1.5,
+    authority_total_start_factor=10.0,
+    authority_bonus_half_life_days=0.7,
 ):
     seen_ids = set()
     contributions = []
@@ -166,7 +209,14 @@ def calculate_topic_article_score(
             continue
         seen_ids.add(article_id)
         result = calculate_article_contribution(
-            article, now, source_weights, half_life_days, default_weight
+            article,
+            now,
+            source_weights,
+            half_life_days,
+            default_weight,
+            authority_base_factor=authority_base_factor,
+            authority_total_start_factor=authority_total_start_factor,
+            authority_bonus_half_life_days=authority_bonus_half_life_days,
         )
         contributions.append({"news_id": article_id, **result})
     return {
@@ -184,6 +234,10 @@ def calculate_topic_metrics(
     half_life_days=3,
     default_weight=1.0,
     previous_days=6,
+    *,
+    authority_base_factor=1.5,
+    authority_total_start_factor=10.0,
+    authority_bonus_half_life_days=0.7,
 ):
     unique_articles = {}
     for article in articles:
@@ -203,6 +257,9 @@ def calculate_topic_metrics(
         source_weights,
         half_life_days=half_life_days,
         default_weight=default_weight,
+        authority_base_factor=authority_base_factor,
+        authority_total_start_factor=authority_total_start_factor,
+        authority_bonus_half_life_days=authority_bonus_half_life_days,
     )
     swedish_article_score = sum(
         (
@@ -223,6 +280,24 @@ def calculate_topic_metrics(
             articles, now, half_life_days=half_life_days
         ),
         "swedish_signal": calculate_swedish_signal(articles, swedish_sources),
+        "authority_article_score": sum(
+            item["contribution"]
+            for item in article_result["contributions"]
+            if item["source_type"] == "authority"
+        ),
+        "authority_base_score": sum(
+            item["authority_base_weight"] * item["time_weight"]
+            for item in article_result["contributions"]
+            if item["source_type"] == "authority"
+        ),
+        "authority_base_factor": authority_base_factor,
+        "authority_total_start_factor": authority_total_start_factor,
+        "authority_bonus_half_life_days": authority_bonus_half_life_days,
+        "authority_bonus_score": sum(
+            item["authority_bonus"] * item["time_weight"]
+            for item in article_result["contributions"]
+            if item["source_type"] == "authority"
+        ),
     }
 
 
@@ -340,6 +415,9 @@ def calculate_topic_ranking(
     half_life_days=3,
     default_weight=1.0,
     previous_days=6,
+    authority_base_factor=1.5,
+    authority_total_start_factor=10.0,
+    authority_bonus_half_life_days=0.7,
 ):
     metrics = calculate_topic_metrics(
         articles,
@@ -349,6 +427,9 @@ def calculate_topic_ranking(
         half_life_days=half_life_days,
         default_weight=default_weight,
         previous_days=previous_days,
+        authority_base_factor=authority_base_factor,
+        authority_total_start_factor=authority_total_start_factor,
+        authority_bonus_half_life_days=authority_bonus_half_life_days,
     )
     result = build_topic_score_result(
         metrics,
@@ -364,6 +445,9 @@ def calculate_topic_ranking(
         "half_life_days": half_life_days,
         "default_source_weight": default_weight,
         "previous_days": previous_days,
+        "authority_base_factor": authority_base_factor,
+        "authority_total_start_factor": authority_total_start_factor,
+        "authority_bonus_half_life_days": authority_bonus_half_life_days,
         "future_tolerance_seconds": FUTURE_TOLERANCE.total_seconds(),
         "source_weights": dict(source_weights),
         "swedish_sources": sorted(swedish_sources),
@@ -387,6 +471,9 @@ def rank_topics(
     default_weight=1.0,
     previous_days=6,
     top_n=None,
+    authority_base_factor=1.5,
+    authority_total_start_factor=10.0,
+    authority_bonus_half_life_days=0.7,
 ):
     if top_n is not None:
         if isinstance(top_n, bool) or not isinstance(top_n, int) or top_n < 1:
@@ -439,6 +526,9 @@ def rank_topics(
             half_life_days=half_life_days,
             default_weight=default_weight,
             previous_days=previous_days,
+            authority_base_factor=authority_base_factor,
+            authority_total_start_factor=authority_total_start_factor,
+            authority_bonus_half_life_days=authority_bonus_half_life_days,
         )
         ranked.append({"id": topic_id, **result})
     ranked.sort(key=lambda topic: (-topic["score"], topic["id"]))

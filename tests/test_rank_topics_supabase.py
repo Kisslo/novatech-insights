@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -320,20 +320,35 @@ def test_unexpected_calculation_error_is_not_cleared(monkeypatch):
     assert not any(method == "PATCH" for method, _, _ in calls)
 
 
-def test_missing_stored_normalization_is_a_warning(monkeypatch):
+@pytest.mark.parametrize("source_type", ["media", "authority"])
+def test_missing_stored_normalization_matches_fallback(monkeypatch, source_type):
     data = rows()
     data["news"][0]["source_normalized"] = None
+    data["source_registry"][0]["source_type"] = source_type
+    original = deepcopy(data["news"])
+    config = {**CONFIG, "source_weights": {"breakit": 1.7}}
     calls = []
     monkeypatch.setattr(adapter, "request_json", paged_request(data, calls))
 
-    result = adapter.run_ranking(
-        url="https://example.test", key="secret", now=NOW, config=CONFIG
+    missing_result = adapter.run_ranking(
+        url="https://example.test", key="secret", now=NOW, config=config
     )
 
-    assert result["warnings"] == ["news_id=101 has no stored source normalization."]
-    metrics = result["topics"][0]["values"]["score_breakdown"]["metrics"]
-    assert metrics["source_count"] == 1
-    assert metrics["swedish_signal"] == 1.0
+    stored_data = deepcopy(data)
+    stored_data["news"][0]["source_normalized"] = "breakit"
+    monkeypatch.setattr(adapter, "request_json", paged_request(stored_data, []))
+    stored_result = adapter.run_ranking(
+        url="https://example.test", key="secret", now=NOW, config=config
+    )
+
+    missing_values = missing_result["topics"][0]["values"]
+    stored_values = stored_result["topics"][0]["values"]
+    assert missing_result["warnings"] == [
+        "news_id=101 has no stored source normalization."
+    ]
+    assert missing_values["score"] == stored_values["score"]
+    assert missing_values["score_breakdown"] == stored_values["score_breakdown"]
+    assert data["news"] == original
 
 
 def test_mismatched_stored_normalization_aborts_before_writing(monkeypatch):
@@ -368,16 +383,20 @@ def test_missing_registry_match_is_rankable_without_bonus(monkeypatch):
     )
 
 
-def test_registry_authority_classification_affects_run_ranking_contributions(monkeypatch):
+def test_registry_authority_classification_affects_run_ranking_contributions(
+    monkeypatch,
+):
     data = rows()
     data["source_registry"][0]["source_type"] = "authority"
-    data["news"][0]["published"] = NOW.isoformat()
+    age_days = 2
+    data["news"][0]["published"] = (NOW - timedelta(days=age_days)).isoformat()
     calls = []
     monkeypatch.setattr(adapter, "request_json", paged_request(data, calls))
     config = {
         **CONFIG,
-        "authority_base_factor": 2.0,
-        "authority_total_start_factor": 6.5,
+        "source_weights": {"breakit": 1.7},
+        "authority_base_factor": 2.2,
+        "authority_total_start_factor": 7.4,
         "authority_bonus_half_life_days": 1.3,
     }
 
@@ -386,9 +405,25 @@ def test_registry_authority_classification_affects_run_ranking_contributions(mon
     )
 
     metrics = result["topics"][0]["values"]["score_breakdown"]["metrics"]
-    assert metrics["authority_base_score"] == pytest.approx(2.0)
-    assert metrics["authority_bonus_score"] == pytest.approx(4.5)
-    assert metrics["authority_article_score"] == pytest.approx(6.5)
+    source_weight = 1.7
+    authority_base_factor = 2.2
+    authority_total_start_factor = 7.4
+    authority_bonus_half_life_days = 1.3
+    time_weight = 0.5 ** (age_days / config["half_life_days"])
+    bonus_decay = 0.5 ** (age_days / authority_bonus_half_life_days)
+    expected_base = source_weight * authority_base_factor * time_weight
+    expected_bonus = (
+        source_weight
+        * (authority_total_start_factor - authority_base_factor)
+        * bonus_decay
+        * time_weight
+    )
+
+    assert metrics["authority_base_score"] == pytest.approx(expected_base)
+    assert metrics["authority_bonus_score"] == pytest.approx(expected_bonus)
+    assert metrics["authority_article_score"] == pytest.approx(
+        expected_base + expected_bonus
+    )
 
 
 def test_registry_read_error_is_not_treated_as_unclassified(monkeypatch):

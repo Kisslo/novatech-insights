@@ -153,9 +153,9 @@ def read_input(url, key):
         if link["news_id"] not in article_by_id:
             raise SupabaseReadError("Topic links reference an unknown article.")
         ranking_article = dict(article_by_id[link["news_id"]])
-        normalized_source = ranking_article.get("source_normalized") or normalize_source(
-            ranking_article.get("source")
-        )
+        normalized_source = ranking_article.get(
+            "source_normalized"
+        ) or normalize_source(ranking_article.get("source"))
         ranking_article["source"] = normalized_source
         ranking_article["source_type"] = source_types.get(normalized_source)
         topic_articles[link["topic_id"]].append(ranking_article)

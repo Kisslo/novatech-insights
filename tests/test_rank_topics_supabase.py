@@ -331,6 +331,9 @@ def test_missing_stored_normalization_is_a_warning(monkeypatch):
     )
 
     assert result["warnings"] == ["news_id=101 has no stored source normalization."]
+    metrics = result["topics"][0]["values"]["score_breakdown"]["metrics"]
+    assert metrics["source_count"] == 1
+    assert metrics["swedish_signal"] == 1.0
 
 
 def test_mismatched_stored_normalization_aborts_before_writing(monkeypatch):
@@ -363,6 +366,29 @@ def test_missing_registry_match_is_rankable_without_bonus(monkeypatch):
         ]
         == 0
     )
+
+
+def test_registry_authority_classification_affects_run_ranking_contributions(monkeypatch):
+    data = rows()
+    data["source_registry"][0]["source_type"] = "authority"
+    data["news"][0]["published"] = NOW.isoformat()
+    calls = []
+    monkeypatch.setattr(adapter, "request_json", paged_request(data, calls))
+    config = {
+        **CONFIG,
+        "authority_base_factor": 2.0,
+        "authority_total_start_factor": 6.5,
+        "authority_bonus_half_life_days": 1.3,
+    }
+
+    result = adapter.run_ranking(
+        url="https://example.test", key="secret", now=NOW, config=config
+    )
+
+    metrics = result["topics"][0]["values"]["score_breakdown"]["metrics"]
+    assert metrics["authority_base_score"] == pytest.approx(2.0)
+    assert metrics["authority_bonus_score"] == pytest.approx(4.5)
+    assert metrics["authority_article_score"] == pytest.approx(6.5)
 
 
 def test_registry_read_error_is_not_treated_as_unclassified(monkeypatch):

@@ -60,10 +60,14 @@ DECLARE
         'the new stack',
         'the register',
         'unite.ai',
-        'wired'
+        'wired',
+        'european commission digital strategy',
+        'imy',
+        'cert-se',
+        'european data protection board'
     ];
 BEGIN
-    -- All 30 expected comparison keys must exist.
+    -- All 34 expected comparison keys must exist.
     IF EXISTS (
         SELECT 1
         FROM unnest(expected_sources) AS expected(source_key)

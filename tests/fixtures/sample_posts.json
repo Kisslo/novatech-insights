@@ -1,0 +1,35 @@
+{
+  "_comment": "Example posts for the draft endpoint (#30). Same fields as the posts table in sql/008: id, topic_id, status, kisslo_angle. topic_id points to tests/fixtures/sample_topics.json. Post 1 is ready for a first draft, post 2 waits for an angle, post 3 already has a draft (a new call makes a new version), post 4 is approved (no new draft allowed) and post 5 points to topic 106, which has no label.",
+  "posts": [
+    {
+      "id": 1,
+      "topic_id": 101,
+      "status": "angle_received",
+      "kisslo_angle": "Småföretag ska inte vänta på att reglerna blir klara. Den som redan nu skriver ner var AI används i verksamheten har gjort det mesta av jobbet."
+    },
+    {
+      "id": 2,
+      "topic_id": 102,
+      "status": "awaiting_angle",
+      "kisslo_angle": null
+    },
+    {
+      "id": 3,
+      "topic_id": 103,
+      "status": "draft_generated",
+      "kisslo_angle": "Föreningar ska börja med ansökningarna, där sparar AI mest tid, och hålla medlemsregistret utanför."
+    },
+    {
+      "id": 4,
+      "topic_id": 105,
+      "status": "approved",
+      "kisslo_angle": "Myndigheternas tester visar vad småföretag kan göra i sin egen kundtjänst."
+    },
+    {
+      "id": 5,
+      "topic_id": 106,
+      "status": "angle_received",
+      "kisslo_angle": "En vinkel till ett ämne som saknar rubrik."
+    }
+  ]
+}

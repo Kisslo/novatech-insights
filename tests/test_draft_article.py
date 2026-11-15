@@ -3,10 +3,13 @@ import pytest
 import draft_article
 from content_tools import ClaudeError
 from draft_article import (
+    REVIEW_SYSTEM_PROMPT,
     STYLE_GUIDE,
     add_byline,
+    apply_review,
     article_body,
     build_draft_prompt,
+    build_review_prompt,
     check_draft,
     check_inputs,
     count_sections,
@@ -16,7 +19,10 @@ from draft_article import (
     find_topic,
     main,
     parse_response,
+    parse_review_response,
+    review_problems,
     source_news_ids,
+    sources_section,
     write_draft,
 )
 
@@ -70,13 +76,31 @@ def make_response(article=None, linkedin=LINKEDIN, notes="- En anteckning."):
     )
 
 
-def fake_call(response, calls=None):
-    """A stand-in for call_claude that records the prompts it gets."""
+def make_review(article=None, linkedin=LINKEDIN, notes="- Strök en upprepning."):
+    article = make_article() if article is None else article
+    return (
+        f"<article_draft>\n{article}\n</article_draft>\n"
+        f"<linkedin_post>\n{linkedin}\n</linkedin_post>\n"
+        f"<review_notes>\n{notes}\n</review_notes>"
+    )
+
+
+def fake_call(response, review=None, calls=None):
+    """A stand-in for call_claude: call 1 gets `response`, call 2 gets `review`.
+
+    The two calls are told apart by their system prompt. Without `review`,
+    the review returns the standard texts unchanged. `review` can also be an
+    exception to raise. Every (system prompt, prompt) pair is saved in `calls`.
+    """
 
     def call(model, system_prompt, prompt, effort, max_tokens):
         if calls is not None:
-            calls.append(prompt)
-        return response, 1000, 2000
+            calls.append((system_prompt, prompt))
+        if system_prompt != REVIEW_SYSTEM_PROMPT:
+            return response, 1000, 2000
+        if isinstance(review, Exception):
+            raise review
+        return (make_review() if review is None else review), 500, 1000
 
     return call
 
@@ -144,6 +168,17 @@ def test_build_draft_prompt_rebut_keeps_facts():
     assert "do not invent counter-evidence" in prompt
 
 
+def test_build_review_prompt_includes_style_guide_texts_and_limits():
+    prompt = build_review_prompt("# Rubrik\n\nArtikeltext", "LinkedIn-text")
+
+    assert STYLE_GUIDE in prompt
+    assert "<article_draft>\n# Rubrik\n\nArtikeltext\n</article_draft>" in prompt
+    assert "<linkedin_post>\nLinkedIn-text\n</linkedin_post>" in prompt
+    assert "Do not add facts, figures, examples, names, sources or links" in prompt
+    assert "Do not remove or move a [UNVERIFIED] tag" in prompt
+    assert 'Do not change anything in the "## Källor" section' in prompt
+
+
 # -------------------- answer
 
 
@@ -161,6 +196,19 @@ def test_parse_response_missing_part_raises(tag):
 
     with pytest.raises(ValueError, match=tag):
         parse_response(response)
+
+
+def test_parse_review_response_splits_three_parts():
+    review = parse_review_response(make_review(notes="- Notering."))
+
+    assert review["article"].startswith("# Rubrik")
+    assert review["linkedin"] == LINKEDIN
+    assert review["review_notes"] == "- Notering."
+
+
+def test_parse_review_response_missing_notes_raises():
+    with pytest.raises(ValueError, match="review_notes"):
+        parse_review_response(make_response())  # has <reviewer_notes> instead
 
 
 def test_add_byline_goes_under_headline():
@@ -237,36 +285,142 @@ def test_draft_stats_counts_unverified_tags():
     assert draft_stats(parts)["unverified"] == 2
 
 
+# -------------------- review guard
+
+
+def test_sources_section_returns_heading_and_lines():
+    assert sources_section(make_article()) == (
+        "## Källor\n"
+        "- Källa A: EU guidance – https://a.se/1\n"
+        "- Källa B: Nya regler – https://b.se/2"
+    )
+    assert sources_section("# Rubrik\n\nText") == ""
+
+
+def test_review_problems_accepts_shorter_text():
+    before = make_article().replace("Ingress med", "Ingress [UNVERIFIED] 25 % med")
+    after = before.replace("ord ord ord ord", "ord ord", 1)
+
+    assert review_problems(before, before) == []
+    assert review_problems(before, after) == []
+
+
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        (lambda a: a + "\n- Ny – https://other.se/x", "links were added or removed"),
+        (lambda a: a.replace("https://b.se/2", ""), "links were added or removed"),
+        (lambda a: a.replace(" [UNVERIFIED]", ""), "[UNVERIFIED] tags changed"),
+        (lambda a: a.replace("Ingress", "Ingress 40 %"), "new figures were added: 40"),
+        (lambda a: a.replace("Källa A: EU", "Källa A: Ny"), "the source list changed"),
+        (lambda a: a.replace("## Avsnitt 2\n", ""), "headings were added or removed"),
+        (lambda a: a.replace("Ingress", "Ingress " + "nytt " * 40), "got longer"),
+    ],
+)
+def test_review_problems_finds_forbidden_changes(change, problem):
+    before = make_article().replace("Ingress", "Ingress [UNVERIFIED]")
+
+    assert problem in "; ".join(review_problems(before, change(before)))
+
+
+def test_review_problems_guards_linkedin_placeholder():
+    after = LINKEDIN.replace(" Läs mer: [LÄNK]", "")
+
+    assert review_problems(LINKEDIN, after) == ["the [LÄNK] placeholder changed"]
+
+
+def test_apply_review_checks_each_text_on_its_own():
+    parts = parse_response(make_response())
+    shorter = make_article().replace("ord ord ord ord", "ord ord", 1)
+    reviewed = {"article": shorter, "linkedin": LINKEDIN + " Se https://x.se/1"}
+
+    result, warnings = apply_review(parts, reviewed)
+
+    assert result["article"] == shorter  # used
+    assert result["linkedin"] == LINKEDIN  # kept from call 1
+    assert result["notes"] == parts["notes"]
+    assert len(warnings) == 1
+    assert "Review of the linkedin was not used (links were added" in warnings[0]
+
+
 # -------------------- write_draft
 
 
-def test_write_draft_returns_checked_draft():
+def test_write_draft_makes_two_calls_with_style_guide():
     calls = []
 
-    draft = write_draft(TOPIC, ANGLE, call=fake_call(make_response(), calls))
+    draft = write_draft(TOPIC, ANGLE, call=fake_call(make_response(), calls=calls))
 
-    assert len(calls) == 1
-    assert STYLE_GUIDE in calls[0]
+    assert len(calls) == 2
+    assert calls[1][0] == REVIEW_SYSTEM_PROMPT
+    assert STYLE_GUIDE in calls[0][1]
+    assert STYLE_GUIDE in calls[1][1]
     assert draft["article"].startswith("# Rubrik")
     assert draft["linkedin"] == LINKEDIN
     assert draft["notes"] == "- En anteckning."
+    assert draft["review_notes"] == "- Strök en upprepning."
+    assert draft["reviewed"] is True
     assert draft["warnings"] == []
     assert draft["source_news_ids"] == [11, 12]
-    assert (draft["tokens_in"], draft["tokens_out"]) == (1000, 2000)
-    assert draft["cost"] == pytest.approx(0.022)  # sonnet 5.5: 2 in, 10 out per MTok
+    assert (draft["tokens_in"], draft["tokens_out"]) == (1500, 3000)  # both calls
+    assert draft["cost"] == pytest.approx(0.033)  # sonnet 5.5: 2 in, 10 out per MTok
+
+
+def test_write_draft_uses_reviewed_text():
+    shorter = make_article().replace("ord ord ord ord", "ord ord", 1)
+
+    draft = write_draft(
+        TOPIC, ANGLE, call=fake_call(make_response(), make_review(article=shorter))
+    )
+
+    assert draft["article"] == shorter
+    assert draft["warnings"] == []
+
+
+def test_write_draft_keeps_first_text_when_review_adds_a_link():
+    changed = make_article() + "\n- Ny källa – https://other.se/x"
+
+    draft = write_draft(
+        TOPIC, ANGLE, call=fake_call(make_response(), make_review(article=changed))
+    )
+
+    assert draft["article"] == make_article()
+    assert draft["reviewed"] is True
+    assert len(draft["warnings"]) == 1
+    assert "Review of the article was not used" in draft["warnings"][0]
+
+
+@pytest.mark.parametrize(
+    ("review", "message"),
+    [
+        (ClaudeError("Rate limit reached."), "Review step failed: Rate limit reached."),
+        ("Inga taggar här", "Review step failed: <article_draft> is missing"),
+    ],
+)
+def test_write_draft_keeps_first_text_when_review_fails(review, message):
+    draft = write_draft(TOPIC, ANGLE, call=fake_call(make_response(), review))
+
+    assert draft["article"] == make_article()
+    assert draft["reviewed"] is False
+    assert draft["review_notes"] == ""
+    assert message in draft["warnings"][0]
+    assert "The text is from the first call." in draft["warnings"][0]
 
 
 def test_write_draft_checks_inputs_before_calling_claude():
     calls = []
 
     with pytest.raises(ValueError, match="angle is empty"):
-        write_draft(TOPIC, " ", call=fake_call(make_response(), calls))
+        write_draft(TOPIC, " ", call=fake_call(make_response(), calls=calls))
     assert calls == []
 
 
 def test_write_draft_raises_when_parts_are_missing():
+    calls = []
+
     with pytest.raises(ValueError, match="Could not read the answer"):
-        write_draft(TOPIC, ANGLE, call=fake_call("Inga taggar här"))
+        write_draft(TOPIC, ANGLE, call=fake_call("Inga taggar här", calls=calls))
+    assert len(calls) == 1  # no review call for an unreadable draft
 
 
 # -------------------- main
@@ -301,8 +455,10 @@ def test_dry_run_works_without_api_key(monkeypatch, tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert ANGLE in out
-    assert "No contrast phrasing" in out
-    assert "Dry run: no call to Claude made." in out
+    assert "===== Call 1: write =====" in out
+    assert "===== Call 2: review =====" in out
+    assert out.count("No contrast phrasing") == 2  # style guide in both prompts
+    assert out.count("Dry run: no call to Claude made.") == 2
     assert not (tmp_path / "drafts").exists()
 
 
@@ -315,7 +471,10 @@ def test_main_saves_three_separate_files(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         draft_article,
         "call_claude",
-        fake_call(make_response(article=article, notes="- Bara för granskaren.")),
+        fake_call(
+            make_response(article=article, notes="- Bara för granskaren."),
+            make_review(article=article, notes="- Strök en floskel."),
+        ),
     )
 
     run_main(monkeypatch, tmp_path, ["--author", "Kisslo"])
@@ -328,7 +487,9 @@ def test_main_saves_three_separate_files(monkeypatch, tmp_path, capsys):
     assert "Bara för granskaren" not in article_md + linkedin
     assert "Bara för granskaren" in notes
     assert "No warnings" in notes
+    assert "## Review step (call 2)\n\n- Strök en floskel." in notes
     assert "Stance: agree" in notes
+    assert "Reviewed: yes" in notes
     assert "Saved to:" in capsys.readouterr().out
 
 

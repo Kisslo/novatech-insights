@@ -14,6 +14,7 @@ from draft_store import (
     StoreError,
     build_row,
     check_can_generate,
+    check_can_save,
     load_post,
     load_topic,
     save_version,
@@ -269,6 +270,26 @@ def test_load_topic_from_supabase_without_articles(supabase_env, monkeypatch):
 
     with pytest.raises(StoreError, match="Topic 42 cannot be used: .*no articles"):
         load_topic("supabase", 42)
+
+
+def test_check_can_save_fixture_needs_nothing():
+    check_can_save("fixture")
+
+
+def test_check_can_save_supabase_reads_the_drafts_table(supabase_env, monkeypatch):
+    requests = fake_supabase(monkeypatch, {("GET", "post_drafts"): []})
+
+    check_can_save("supabase")
+
+    assert query(requests[0]) == {"select": "version", "limit": "1"}
+
+
+def test_check_can_save_supabase_missing_table(supabase_env, monkeypatch):
+    error = HTTPError("u", 404, "Not Found", {}, None)
+    fake_supabase(monkeypatch, {("GET", "post_drafts"): error})
+
+    with pytest.raises(StoreError, match="'post_drafts' was not found"):
+        check_can_save("supabase")
 
 
 # -------------------- supabase: saving

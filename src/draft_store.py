@@ -4,6 +4,7 @@ Used by the endpoint POST /drafts/{post_id} in telegram_api.py:
     post = load_post(source, post_id)       # 404 if it does not exist
     check_can_generate(post)                # 409 if the status does not allow it
     topic = load_topic(source, post["topic_id"])
+    check_can_save(source)                  # before any money is spent
     ... write_draft() in draft_article.py ...
     saved = save_version(source, post, build_row(post, draft, stance, model))
 
@@ -257,6 +258,21 @@ def build_row(post: dict, draft: dict, stance: str, model: str) -> dict:
         "source_news_ids": draft["source_news_ids"],
         "stance": stance,
     }
+
+
+def check_can_save(source: str) -> None:
+    """Raise StoreError if a draft could not be saved (asked before Claude is called).
+
+    For supabase: one small read from the drafts table, which fails if the
+    table is missing or the key has no access. That way a missing migration
+    is found before any money is spent. Fixture: nothing to check.
+    """
+    check_source(source)
+    if source == "supabase":
+        read_rows(
+            table_name("DRAFTS_TABLE", DEFAULT_DRAFTS_TABLE),
+            {"select": "version", "limit": "1"},
+        )
 
 
 def next_fixture_version(post_id: int) -> int:

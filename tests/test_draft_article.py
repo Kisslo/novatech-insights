@@ -1,38 +1,48 @@
 import pytest
 
-from src import draft_article
-from src.draft_article import (
+import draft_article
+from content_tools import ClaudeError
+from draft_article import (
+    STYLE_GUIDE,
     add_byline,
     article_body,
-    articles_from_summary,
-    build_prompt,
+    build_draft_prompt,
     check_draft,
+    check_inputs,
     count_sections,
     count_sentences,
     count_words,
     draft_stats,
-    is_readable,
+    find_topic,
     main,
     parse_response,
-    read_argument,
-    read_summary,
+    source_news_ids,
+    write_draft,
 )
 
-SUMMARY = """<!-- model: claude-sonnet-5-5 | cost: $0.0140 -->
+ANGLE = "Småföretag ska inte vänta på EU, de kan börja redan nu."
 
-**AI-agenter i företag**
-
-- Punkt ett.
-
-Relevans för Novatech: Hög – agenter berör våra kunder.
-
-Källor
-- https://a.se/1
-- https://b.se/2 (betalvägg)
-- https://c.se/3 (sponsrad)
-"""
-
-ARGUMENT = "AI-agenter kan spara tid, men människan måste ha kontroll."
+TOPIC = {
+    "id": 7,
+    "label": "EU ger småföretag vägledning om AI-förordningen",
+    "why_relevant_sv": "Småföretag får tydligare besked om kraven.",
+    "articles": [
+        {
+            "news_id": 11,
+            "title": "EU guidance for small businesses",
+            "source": "Källa A",
+            "link": "https://a.se/1",
+            "description": "The Commission released guidance.",
+        },
+        {
+            "news_id": 12,
+            "title": "Nya regler för AI",
+            "source": "Källa B",
+            "link": "https://b.se/2",
+            "description": "",
+        },
+    ],
+}
 
 
 def make_article(words_per_section=150, sections=4):
@@ -40,7 +50,11 @@ def make_article(words_per_section=150, sections=4):
     lines = ["# Rubrik", "", "Ingress med några ord.", ""]
     for i in range(1, sections + 1):
         lines += [f"## Avsnitt {i}", "", "ord " * words_per_section, ""]
-    lines += ["## Källor", "- Källa A – https://a.se/1", "- Källa B – https://b.se/2"]
+    lines += [
+        "## Källor",
+        "- Källa A: EU guidance – https://a.se/1",
+        "- Källa B: Nya regler – https://b.se/2",
+    ]
     return "\n".join(lines)
 
 
@@ -56,92 +70,89 @@ def make_response(article=None, linkedin=LINKEDIN, notes="- En anteckning."):
     )
 
 
+def fake_call(response, calls=None):
+    """A stand-in for call_claude that records the prompts it gets."""
+
+    def call(model, system_prompt, prompt, effort, max_tokens):
+        if calls is not None:
+            calls.append(prompt)
+        return response, 1000, 2000
+
+    return call
+
+
 # -------------------- input
 
 
-def test_read_summary_removes_comment(tmp_path):
-    path = tmp_path / "summary.md"
-    path.write_text(SUMMARY, encoding="utf-8")
-
-    summary = read_summary(path)
-
-    assert "<!--" not in summary
-    assert summary.startswith("**AI-agenter")
-
-
-def test_articles_from_summary_skips_sponsored_and_duplicates():
-    summary = SUMMARY + "\nSe även https://a.se/1."
-
-    articles = articles_from_summary(summary)
-
-    assert [a["link"] for a in articles] == ["https://a.se/1", "https://b.se/2"]
-    assert articles[0]["source"] == "a.se"
-    assert [a["unread"] for a in articles] == [False, True]  # b.se is (betalvägg)
+def test_check_inputs_accepts_good_topic():
+    check_inputs(TOPIC, ANGLE, "agree")
+    check_inputs(TOPIC, ANGLE, "rebut")
 
 
 @pytest.mark.parametrize(
-    ("article", "expected"),
+    ("topic", "angle", "stance", "message"),
     [
-        ({"link": "x", "unread": False}, True),  # no --fetch
-        ({"link": "x", "unread": True}, False),  # (ej läst) or (betalvägg)
-        ({"link": "x", "unread": False, "text": "Brödtext"}, True),
-        ({"link": "x", "unread": False, "text": None}, False),  # fetch failed
+        (TOPIC, "  ", "agree", "angle is empty"),
+        (TOPIC, "x" * 2001, "agree", "longer than"),
+        (TOPIC, ANGLE, "maybe", "Stance must be"),
+        ({**TOPIC, "label": ""}, ANGLE, "agree", "has no label"),
+        ({**TOPIC, "articles": []}, ANGLE, "agree", "has no articles"),
+        ({**TOPIC, "articles": [{"news_id": 1}]}, ANGLE, "agree", "has no link"),
     ],
 )
-def test_is_readable(article, expected):
-    assert is_readable(article) is expected
+def test_check_inputs_rejects_bad_inputs(topic, angle, stance, message):
+    with pytest.raises(ValueError, match=message):
+        check_inputs(topic, angle, stance)
 
 
-def test_read_argument_from_file_and_text(tmp_path):
-    path = tmp_path / "arguments.txt"
-    path.write_text("  Argument från fil.\n", encoding="utf-8")
-
-    assert read_argument(path, None) == "Argument från fil."
-    assert read_argument(None, " Argument i text ") == "Argument i text"
-    assert read_argument(None, None) == ""
+def test_source_news_ids_keeps_rank_order():
+    assert source_news_ids(TOPIC) == [11, 12]
 
 
 # -------------------- prompt
 
 
-def test_build_prompt_contains_argument_summary_and_rules():
-    prompt = build_prompt("Sammanfattning här", ARGUMENT, [])
+def test_build_draft_prompt_contains_angle_topic_sources_and_rules():
+    prompt = build_draft_prompt(TOPIC, ANGLE, "agree")
 
-    assert f"<ceo_argument>\n{ARGUMENT}\n</ceo_argument>" in prompt
-    assert "<summary>\nSammanfattning här\n</summary>" in prompt
+    assert f"<kisslo_angle>\n{ANGLE}\n</kisslo_angle>" in prompt
+    assert "Stance: agree. Kisslo agrees" in prompt
+    assert "Label: EU ger småföretag vägledning om AI-förordningen" in prompt
+    assert '<source id="11">' in prompt
+    assert "Link: https://a.se/1" in prompt
+    assert "Description: No description" in prompt  # article 12 has none
     assert "500–800 words" in prompt
     assert "[UNVERIFIED]" in prompt
-    assert "(sponsrad)" in prompt
-    assert 'Do not add any other "## " section' in prompt
-    assert "also when they come from the CEO's argument" in prompt
-    assert "only for factual claims" in prompt
+    assert "never add other links" in prompt
+    assert "also when they come from Kisslo's angle" in prompt
     assert "never with new facts" in prompt
-    assert "Figures and other measurable claims" in prompt
-    assert "<source" not in prompt  # nothing fetched
 
 
-def test_build_prompt_wraps_fetched_sources():
-    articles = [
-        {"link": "https://a.se/1", "text": "Brödtext"},
-        {"link": "https://b.se/2", "text": None, "paywall": True},
-    ]
+def test_build_draft_prompt_includes_style_guide():
+    prompt = build_draft_prompt(TOPIC, ANGLE, "agree")
 
-    prompt = build_prompt("S", ARGUMENT, articles)
+    assert STYLE_GUIDE in prompt
+    for rule in ("No contrast phrasing", "No consultant buzzwords", "No repetition"):
+        assert rule in prompt
+    assert "Swedish SME angle" in prompt
 
-    assert prompt.count("<source id=") == 2
-    assert "Text: Brödtext" in prompt
-    assert "Text: Not available (paywall)" in prompt
+
+def test_build_draft_prompt_rebut_keeps_facts():
+    prompt = build_draft_prompt(TOPIC, ANGLE, "rebut")
+
+    assert "Stance: rebut." in prompt
+    assert "do not invent counter-evidence" in prompt
 
 
 # -------------------- answer
 
 
 def test_parse_response_splits_three_parts():
-    parts = parse_response(make_response(notes="- Notering"))
+    parts = parse_response(make_response(notes="- Notering."))
 
     assert parts["article"].startswith("# Rubrik")
     assert parts["linkedin"] == LINKEDIN
-    assert parts["notes"] == "- Notering"
+    assert parts["notes"] == "- Notering."
 
 
 @pytest.mark.parametrize("tag", ["article_draft", "linkedin_post", "reviewer_notes"])
@@ -153,26 +164,25 @@ def test_parse_response_missing_part_raises(tag):
 
 
 def test_add_byline_goes_under_headline():
-    result = add_byline("# Rubrik\n\nIngress.", "Kisslo")
-
-    assert result == "# Rubrik\n\n*Av Kisslo*\n\nIngress."
+    assert add_byline("# Rubrik\n\nText", "Kisslo") == "# Rubrik\n\n*Av Kisslo*\n\nText"
 
 
 def test_add_byline_without_headline_goes_first():
-    assert add_byline("Ingress.", "Kisslo").startswith("*Av Kisslo*")
+    assert add_byline("Text", "Kisslo") == "*Av Kisslo*\n\nText"
 
 
 # -------------------- checks
 
 
 def test_article_body_skips_headline_and_sources():
-    body = article_body("# Rubrik\nText här\n## Källor\n- https://a.se/1")
+    body = article_body(make_article(words_per_section=1, sections=1))
 
-    assert body == "Text här"
+    assert "Rubrik" not in body
+    assert "https://a.se/1" not in body
 
 
 def test_count_words_ignores_markdown_and_tags():
-    assert count_words("## Avsnitt\nEtt två [UNVERIFIED] tre-fyra.") == 4
+    assert count_words("## Två ord [UNVERIFIED] **tre**") == 3
 
 
 def test_count_sections_ignores_source_list():
@@ -181,12 +191,7 @@ def test_count_sections_ignores_source_list():
 
 @pytest.mark.parametrize(
     ("text", "expected"),
-    [
-        (LINKEDIN, 4),  # "Läs mer: [LÄNK]" without a full stop counts too
-        ("En mening.", 1),
-        ("Version 2.5 är här. Bra!", 2),  # a dot inside a number is not an end
-        ("", 0),
-    ],
+    [(LINKEDIN, 4), ("En mening utan punkt", 1), ("", 0)],
 )
 def test_count_sentences(text, expected):
     assert count_sentences(text) == expected
@@ -194,48 +199,35 @@ def test_count_sentences(text, expected):
 
 def test_check_draft_accepts_good_draft():
     parts = parse_response(make_response())
-    articles = articles_from_summary(SUMMARY)
 
-    assert check_draft(parts, articles) == []
-
-
-def test_check_draft_allows_leaving_out_unread_source():
-    # Real run 2026-10-23: The Register was (ej läst) and rightly left out.
-    summary = "Källor\n- https://a.se/1\n- https://reg.com/x (ej läst)"
-    article = make_article().replace("- Källa B – https://b.se/2", "")
-    parts = parse_response(make_response(article=article))
-
-    assert check_draft(parts, articles_from_summary(summary)) == []
-
-
-def test_check_draft_still_requires_read_sources():
-    summary = "Källor\n- https://a.se/1\n- https://c.se/3"
-    parts = parse_response(make_response())  # lists a.se and b.se, not c.se
-
-    warnings = "\n".join(check_draft(parts, articles_from_summary(summary)))
-
-    assert "Source missing from 'Källor': https://c.se/3" in warnings
-    assert "Link not in the sources (check it!): https://b.se/2" in warnings
+    assert check_draft(parts, TOPIC["articles"]) == []
 
 
 def test_check_draft_warns_about_problems():
-    parts = parse_response(
-        make_response(
-            article=make_article(words_per_section=50, sections=2)
-            + "\n- https://invented.com/x",
-            linkedin="En mening. Notes for reviewer: hemligt.",
-        )
-    )
-    articles = articles_from_summary(SUMMARY)
+    article = make_article(words_per_section=10, sections=2).replace("# Rubrik", "")
+    article += "\n- Extra – https://other.se/x"
+    linkedin = "En mening. Se https://a.se/1 Notes for reviewer"
+    parts = parse_response(make_response(article=article, linkedin=linkedin))
 
-    warnings = "\n".join(check_draft(parts, articles))
+    warnings = "\n".join(check_draft(parts, TOPIC["articles"]))
 
     assert "words" in warnings
     assert "2 sections" in warnings
-    assert "sentences" in warnings
-    assert "[LÄNK]" in warnings
+    assert "no '# ' headline" in warnings
+    assert "no [LÄNK]" in warnings
     assert "leaked into the linkedin" in warnings
-    assert "invented.com/x" in warnings
+    assert "Link not in the sources (check it!): https://other.se/x" in warnings
+    assert "LinkedIn post: Link not in the sources" not in warnings  # a.se/1 is ok
+    assert "Source missing" not in warnings
+
+
+def test_check_draft_warns_about_missing_source():
+    article = make_article().replace("- Källa B: Nya regler – https://b.se/2", "")
+    parts = parse_response(make_response(article=article))
+
+    assert check_draft(parts, TOPIC["articles"]) == [
+        "Source missing from 'Källor': https://b.se/2"
+    ]
 
 
 def test_draft_stats_counts_unverified_tags():
@@ -245,72 +237,107 @@ def test_draft_stats_counts_unverified_tags():
     assert draft_stats(parts)["unverified"] == 2
 
 
+# -------------------- write_draft
+
+
+def test_write_draft_returns_checked_draft():
+    calls = []
+
+    draft = write_draft(TOPIC, ANGLE, call=fake_call(make_response(), calls))
+
+    assert len(calls) == 1
+    assert STYLE_GUIDE in calls[0]
+    assert draft["article"].startswith("# Rubrik")
+    assert draft["linkedin"] == LINKEDIN
+    assert draft["notes"] == "- En anteckning."
+    assert draft["warnings"] == []
+    assert draft["source_news_ids"] == [11, 12]
+    assert (draft["tokens_in"], draft["tokens_out"]) == (1000, 2000)
+    assert draft["cost"] == pytest.approx(0.022)  # sonnet 5.5: 2 in, 10 out per MTok
+
+
+def test_write_draft_checks_inputs_before_calling_claude():
+    calls = []
+
+    with pytest.raises(ValueError, match="angle is empty"):
+        write_draft(TOPIC, " ", call=fake_call(make_response(), calls))
+    assert calls == []
+
+
+def test_write_draft_raises_when_parts_are_missing():
+    with pytest.raises(ValueError, match="Could not read the answer"):
+        write_draft(TOPIC, ANGLE, call=fake_call("Inga taggar här"))
+
+
 # -------------------- main
 
 
 def run_main(monkeypatch, tmp_path, extra_args):
-    summary = tmp_path / "summary.md"
-    summary.write_text(SUMMARY, encoding="utf-8")
     monkeypatch.setattr(draft_article, "OUTPUT_DIR", tmp_path / "drafts")
+    monkeypatch.setattr(draft_article, "load_dotenv", lambda: None)
     monkeypatch.setattr(
         "sys.argv",
-        [
-            "draft_article.py",
-            "--summary",
-            str(summary),
-            "--argument-text",
-            ARGUMENT,
-            "--author",
-            "Kisslo",
-            *extra_args,
-        ],
+        ["draft_article.py", "--topic-id", "101", "--angle", ANGLE, *extra_args],
     )
     main()
 
 
+def test_find_topic_reads_example_file():
+    topic = find_topic(101)
+
+    assert topic["label"]
+    assert topic["articles"]
+
+
+def test_find_topic_unknown_id_exits():
+    with pytest.raises(SystemExit, match="Topic 999 is not in"):
+        find_topic(999)
+
+
 def test_dry_run_works_without_api_key(monkeypatch, tmp_path, capsys):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(draft_article, "load_dotenv", lambda: None)
 
     run_main(monkeypatch, tmp_path, ["--dry-run"])
 
     out = capsys.readouterr().out
-    assert ARGUMENT in out
+    assert ANGLE in out
+    assert "No contrast phrasing" in out
     assert "Dry run: no call to Claude made." in out
     assert not (tmp_path / "drafts").exists()
 
 
 def test_main_saves_three_separate_files(monkeypatch, tmp_path, capsys):
-    calls = []
+    topic = find_topic(101)
+    article = "\n".join(
+        [make_article().split("## Källor")[0], "## Källor"]
+        + [f"- {a['source']}: {a['title']} – {a['link']}" for a in topic["articles"]]
+    )
+    monkeypatch.setattr(
+        draft_article,
+        "call_claude",
+        fake_call(make_response(article=article, notes="- Bara för granskaren.")),
+    )
 
-    def fake_call_claude(model, system_prompt, prompt, effort, max_tokens):
-        calls.append(prompt)
-        return make_response(notes="- Bara för granskaren."), 1000, 2000
+    run_main(monkeypatch, tmp_path, ["--author", "Kisslo"])
 
-    monkeypatch.setattr(draft_article, "call_claude", fake_call_claude)
-
-    run_main(monkeypatch, tmp_path, [])
-
-    assert len(calls) == 1
     folder = next((tmp_path / "drafts").iterdir())
-    article = (folder / "article.md").read_text(encoding="utf-8")
+    article_md = (folder / "article.md").read_text(encoding="utf-8")
     linkedin = (folder / "linkedin.md").read_text(encoding="utf-8")
     notes = (folder / "reviewer_notes.md").read_text(encoding="utf-8")
-    assert article.startswith("# Rubrik\n\n*Av Kisslo*")
-    assert "Bara för granskaren" not in article + linkedin
+    assert article_md.startswith("# Rubrik\n\n*Av Kisslo*")
+    assert "Bara för granskaren" not in article_md + linkedin
     assert "Bara för granskaren" in notes
     assert "No warnings" in notes
+    assert "Stance: agree" in notes
     assert "Saved to:" in capsys.readouterr().out
 
 
-def test_main_saves_raw_answer_when_parts_are_missing(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        draft_article, "call_claude", lambda *args: ("Inga taggar här", 10, 10)
-    )
+def test_main_exits_cleanly_on_claude_error(monkeypatch, tmp_path):
+    def failing_call(*args):
+        raise ClaudeError("Rate limit reached. Wait a minute and try again.")
 
-    with pytest.raises(SystemExit, match="Could not read the answer"):
+    monkeypatch.setattr(draft_article, "call_claude", failing_call)
+
+    with pytest.raises(SystemExit, match="Rate limit reached"):
         run_main(monkeypatch, tmp_path, [])
-
-    folder = next((tmp_path / "drafts").iterdir())
-    assert folder.name.startswith("failed_")
-    assert (folder / "raw_response.md").read_text(encoding="utf-8") == "Inga taggar här"
+    assert not (tmp_path / "drafts").exists()

@@ -200,6 +200,7 @@ jobs:
               psql -X -U postgres -d "$test_database" \
               -v ON_ERROR_STOP=1 < sql/test_required_source_normalization.sql
           done
+
       - name: Test topic status and Telegram posts
         env:
           TEST_CONTAINER: ${{ job.services.postgres.id }}
@@ -244,4 +245,23 @@ jobs:
               psql -X -U postgres -d "$test_database" \
               -v ON_ERROR_STOP=1 \
               -f /tmp/test_source_registry_seed.sql
+          done
+
+      - name: Test authority source classifications
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker cp sql/classify_authority_sources.sql \
+            "$TEST_CONTAINER:/tmp/classify_authority_sources.sql"
+
+          docker cp sql/test_authority_classification.sql \
+            "$TEST_CONTAINER:/tmp/test_authority_classification.sql"
+
+          for test_database in novatech_test novatech_permissions_test
+          do
+            echo "Testing authority classifications in $test_database"
+            docker exec "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 \
+              -f /tmp/test_authority_classification.sql
           done

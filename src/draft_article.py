@@ -68,7 +68,7 @@ DEFAULT_EFFORT = "low"  # low / medium / high; low = least thinking, cheapest
 DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_AUTHOR = "Kisslo Shek"
 
-ARTICLE_MIN_WORDS = 500
+WRITE_MIN_WORDS = 600
 ARTICLE_MAX_WORDS = 800
 MIN_SECTIONS = 3
 MAX_SECTIONS = 4
@@ -135,14 +135,15 @@ Stance: {stance}. {stance_instruction}
 {style_guide}
 
 Article rules:
-- {min_words}–{max_words} words, in Markdown
+- {write_min_words}–{max_words} words, in Markdown
 - Structure, in this order: a "# " headline; an intro paragraph; \
 {min_sections}–{max_sections} "## " sections in total, the last one with Novatech's \
 own recommendations, ending with a short closing paragraph; then "## {sources}" with \
 one line per source you used: "- <publication>: <title> – <link>". Do not add any \
 other "## " section, such as a separate conclusion
 - Do not write an author line; it is added later
-- Kisslo's angle is the core; the news are examples
+- Kisslo is the author. Write as Novatech ("vi") and never mention Kisslo by \
+name, neither in the article nor in the LinkedIn post
 - The sources are short descriptions, not full articles. Use only what they say
 - Only sources given in <source> tags may appear in "{sources}" or anywhere else; \
 never add other links
@@ -150,8 +151,9 @@ never add other links
 after the claim
 - Use {tag} only for factual claims; Novatech's own opinions and recommendations \
 are not tagged
-- Figures and other measurable claims (numbers, percentages, amounts, dates) that \
-the sources do not contain must be marked {tag}, also when they come from \
+- Figures and other measurable claims (numbers, percentages, amounts, dates, and \
+how long something takes or what it costs) that the sources do not contain \
+must be marked {tag}, also when they come from \
 Kisslo's angle and also in the headline
 - If the sources are short, reach the word count with Kisslo's angle and \
 Novatech's own analysis and recommendations, never with new facts
@@ -161,8 +163,9 @@ Novatech's own analysis and recommendations, never with new facts
 
 LinkedIn rules:
 - {min_sentences}–{max_sentences} sentences in Swedish, no headline, written \
-in Kisslo's voice
-- End with "Läs mer: {placeholder}" ({placeholder} is replaced with the article's \
+in the first person as Kisslo
+- After the sentences, end with a last line "Läs mer: {placeholder}". It does not \
+count as one of the sentences ({placeholder} is replaced with the article's \
 link later)
 - Same {tag} rule as the article
 
@@ -299,7 +302,7 @@ def build_draft_prompt(topic: dict, angle: str, stance: str) -> str:
         label=topic["label"].strip(),
         why_relevant=(topic.get("why_relevant_sv") or "").strip() or "Not given",
         sources_block=build_sources_block(topic["articles"]),
-        min_words=ARTICLE_MIN_WORDS,
+        write_min_words=WRITE_MIN_WORDS,
         max_words=ARTICLE_MAX_WORDS,
         min_sections=MIN_SECTIONS,
         max_sections=MAX_SECTIONS,
@@ -400,14 +403,19 @@ def count_sentences(text: str) -> int:
     return sum(1 for piece in pieces if re.search(r"\w", piece))
 
 
+def count_linkedin_sentences(linkedin: str) -> int:
+    """Sentences in the LinkedIn post, not counting the "Läs mer: [LÄNK]" line."""
+    return count_sentences(linkedin.split("Läs mer:")[0])
+
+
 def check_draft(parts: dict[str, str], articles: list[dict]) -> list[str]:
     """Check length, structure, tags and links. Returns warnings for the reviewer."""
     warnings = []
     words = count_words(article_body(parts["article"]))
-    if not ARTICLE_MIN_WORDS <= words <= ARTICLE_MAX_WORDS:
+    if not WRITE_MIN_WORDS <= words <= ARTICLE_MAX_WORDS:
         warnings.append(
             f"Article has {words} words "
-            f"(expected {ARTICLE_MIN_WORDS}–{ARTICLE_MAX_WORDS})."
+            f"(expected {WRITE_MIN_WORDS}–{ARTICLE_MAX_WORDS})."
         )
     sections = count_sections(parts["article"])
     if not MIN_SECTIONS <= sections <= MAX_SECTIONS:
@@ -416,7 +424,7 @@ def check_draft(parts: dict[str, str], articles: list[dict]) -> list[str]:
         )
     if not any(line.startswith("# ") for line in parts["article"].splitlines()):
         warnings.append("Article has no '# ' headline.")
-    sentences = count_sentences(parts["linkedin"])
+    sentences = count_linkedin_sentences(parts["linkedin"])
     if not LINKEDIN_MIN_SENTENCES <= sentences <= LINKEDIN_MAX_SENTENCES:
         warnings.append(
             f"LinkedIn post has about {sentences} sentences "
@@ -427,6 +435,8 @@ def check_draft(parts: dict[str, str], articles: list[dict]) -> list[str]:
     for name in ("article", "linkedin"):
         if "notes for reviewer" in parts[name].lower():
             warnings.append(f"Reviewer notes leaked into the {name} text.")
+        if "kisslo" in parts[name].lower():
+            warnings.append(f"The {name} text mentions Kisslo by name.")
     warnings.extend(check_source_links(parts["article"], articles))
     # The LinkedIn post may only link with the placeholder, never to a source.
     warnings.extend(
@@ -441,7 +451,7 @@ def draft_stats(parts: dict[str, str]) -> dict[str, int]:
     return {
         "words": count_words(article_body(parts["article"])),
         "sections": count_sections(parts["article"]),
-        "linkedin_sentences": count_sentences(parts["linkedin"]),
+        "linkedin_sentences": count_linkedin_sentences(parts["linkedin"]),
         "unverified": parts["article"].count(UNVERIFIED_TAG)
         + parts["linkedin"].count(UNVERIFIED_TAG),
     }
@@ -604,8 +614,7 @@ def build_notes_file(
         "# Notes for reviewer (never published)",
         "",
         "## Automatic checks",
-        f"- Words in article: {stats['words']} "
-        f"({ARTICLE_MIN_WORDS}–{ARTICLE_MAX_WORDS})",
+        f"- Words in article: {stats['words']} ({WRITE_MIN_WORDS}–{ARTICLE_MAX_WORDS})",
         f"- Sections: {stats['sections']} ({MIN_SECTIONS}–{MAX_SECTIONS})",
         f"- LinkedIn sentences: ~{stats['linkedin_sentences']} "
         f"({LINKEDIN_MIN_SENTENCES}–{LINKEDIN_MAX_SENTENCES})",

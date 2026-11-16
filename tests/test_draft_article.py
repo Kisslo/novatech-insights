@@ -12,6 +12,7 @@ from draft_article import (
     build_review_prompt,
     check_draft,
     check_inputs,
+    count_linkedin_sentences,
     count_sections,
     count_sentences,
     count_words,
@@ -145,7 +146,10 @@ def test_build_draft_prompt_contains_angle_topic_sources_and_rules():
     assert '<source id="11">' in prompt
     assert "Link: https://a.se/1" in prompt
     assert "Description: No description" in prompt  # article 12 has none
-    assert "500–800 words" in prompt
+    assert "600–800 words" in prompt  # call 1 aims above the 500 minimum
+    assert "never mention Kisslo by name" in prompt
+    assert "how long something takes or what it costs" in prompt
+    assert "It does not count as one of the sentences" in prompt
     assert "[UNVERIFIED]" in prompt
     assert "never add other links" in prompt
     assert "also when they come from Kisslo's angle" in prompt
@@ -243,6 +247,21 @@ def test_count_sections_ignores_source_list():
 )
 def test_count_sentences(text, expected):
     assert count_sentences(text) == expected
+
+
+def test_count_linkedin_sentences_leaves_out_the_link_line():
+    assert count_linkedin_sentences(LINKEDIN) == 3
+    assert count_linkedin_sentences("En. Två. Tre. Fyra. Fem.\n\nLäs mer: [LÄNK]") == 5
+    assert count_linkedin_sentences("Utan länkrad. Två meningar.") == 2
+
+
+def test_check_draft_warns_when_kisslo_is_named():
+    article = make_article().replace("Ingress", "Kisslos syn är att ingress")
+    parts = parse_response(make_response(article=article))
+
+    assert check_draft(parts, TOPIC["articles"]) == [
+        "The article text mentions Kisslo by name."
+    ]
 
 
 def test_check_draft_accepts_good_draft():

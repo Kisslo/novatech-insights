@@ -10,7 +10,8 @@ key check. What one call does:
    and check that a draft can be saved.
 2. Write and review the draft with two Claude calls (draft_article.py).
 3. Save the draft as a new version and set status draft_generated.
-4. Return the texts and a short preview that n8n can send to Telegram.
+4. Return the texts and a short preview that n8n can send to Telegram,
+   with the buttons Publicera, Ändra and Skippa.
 
 Answers:
     200  draft saved (or dry run)
@@ -65,11 +66,27 @@ from draft_store import (
     load_topic,
     save_version,
 )
-from telegram_format import MAX_MESSAGE_CHARS, escape_html, shorten
+from telegram_format import (
+    MAX_CALLBACK_BYTES,
+    MAX_MESSAGE_CHARS,
+    escape_html,
+    shorten,
+)
 
 MAX_PREVIEW_HEADLINE_CHARS = 200
 MAX_PREVIEW_INTRO_CHARS = 600
 MAX_PREVIEW_LINKEDIN_CHARS = 1500
+
+
+# Buttons under the draft in Telegram (decided 16 Nov). n8n handles the
+# presses. The prefixes differ from write/skip for topics, so n8n can tell a
+# topic from a draft. The version is part of the data, so a press always
+# applies to the exact version Kisslo read.
+DRAFT_BUTTONS = (
+    ("Publicera", "publish"),  # publish this version on the website
+    ("Ändra", "revise"),  # Kisslo writes what to change, a new version is made
+    ("Skippa", "keep"),  # keep the draft, do nothing more
+)
 
 logger = logging.getLogger("draft_api")
 router = APIRouter()
@@ -127,9 +144,21 @@ def headline_and_intro(article: str) -> tuple[str, str]:
     return headline, intro
 
 
-def format_preview(draft: dict, version: int) -> dict:
+def draft_buttons(post_id: int, version: int) -> list[dict]:
+    """The three buttons with callback_data "<action>:<post_id>:<version>"."""
+    buttons = []
+    for text, action in DRAFT_BUTTONS:
+        data = f"{action}:{post_id}:{version}"
+        if len(data.encode("utf-8")) > MAX_CALLBACK_BYTES:
+            raise ValueError(f"callback_data is longer than 64 bytes: {data}")
+        buttons.append({"text": text, "callback_data": data})
+    return buttons
+
+
+def format_preview(draft: dict, post_id: int, version: int) -> dict:
     """A short Telegram message (HTML) about the draft: headline, intro,
-    LinkedIn text and the numbers Kisslo needs before he opens the full text.
+    LinkedIn text and the numbers Kisslo needs before he opens the full text,
+    with the buttons Publicera, Ändra and Skippa.
 
     Text is shortened first and escaped afterwards, like in telegram_format.
     """
@@ -152,7 +181,11 @@ def format_preview(draft: dict, version: int) -> dict:
     if not draft["reviewed"]:
         lines.append("Obs: granskningssteget misslyckades, texten är inte granskad.")
     text = "\n".join(lines)
-    return {"text": text[:MAX_MESSAGE_CHARS], "parse_mode": "HTML"}
+    return {
+        "text": text[:MAX_MESSAGE_CHARS],
+        "parse_mode": "HTML",
+        "buttons": draft_buttons(post_id, version),
+    }
 
 
 def read_post_and_topic(source: str, post_id: int) -> tuple[dict, dict]:
@@ -261,7 +294,7 @@ def create_draft(
         "stats": draft["stats"],
         "warnings": draft["warnings"],
         "cost_usd": None if draft["cost"] is None else round(draft["cost"], 4),
-        "preview": format_preview(draft, saved["version"]),
+        "preview": format_preview(draft, post_id, saved["version"]),
         "article": draft["article"],
         "linkedin": draft["linkedin"],
         "reviewer_notes": row["reviewer_notes"],

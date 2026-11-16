@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 import draft_api
 import draft_store
 from content_tools import ClaudeError
-from draft_api import format_preview, headline_and_intro
+from draft_api import draft_buttons, format_preview, headline_and_intro
 from draft_article import REVIEW_SYSTEM_PROMPT, STANCES, STYLE_GUIDE
 from draft_store import StoreError
 from telegram_api import app
@@ -205,6 +205,22 @@ def test_preview_is_a_short_telegram_message(claude):
         "\n"
         "Ord: 611 · Avsnitt: 3 · [UNVERIFIED]: 0 · Varningar: 0"
     )
+    assert preview["buttons"] == [
+        {"text": "Publicera", "callback_data": "publish:1:1"},
+        {"text": "Ändra", "callback_data": "revise:1:1"},
+        {"text": "Skippa", "callback_data": "keep:1:1"},
+    ]
+
+
+def test_buttons_follow_the_new_version(claude):
+    post_draft(3)
+    second = post_draft(3).json()
+
+    assert [b["callback_data"] for b in second["preview"]["buttons"]] == [
+        "publish:3:2",
+        "revise:3:2",
+        "keep:3:2",
+    ]
 
 
 def test_a_new_call_creates_a_new_version(claude, tmp_path):
@@ -381,8 +397,20 @@ def test_format_preview_shortens_long_texts_and_stays_within_telegram_limit():
         "reviewed": True,
     }
 
-    text = format_preview(draft, 3)["text"]
+    text = format_preview(draft, 1, 3)["text"]
 
     assert len(text) < 4096
     assert text.startswith("<b>Utkast v3: RRR")
     assert "[UNVERIFIED]: 2 · Varningar: 2" in text
+
+
+def test_draft_buttons_do_not_reuse_the_topic_prefixes():
+    data = [b["callback_data"] for b in draft_buttons(7, 2)]
+
+    assert data == ["publish:7:2", "revise:7:2", "keep:7:2"]
+    assert not any(d.startswith(("write:", "skip:")) for d in data)
+
+
+def test_draft_buttons_stay_within_telegram_limit():
+    for button in draft_buttons(10**18, 10**6):
+        assert len(button["callback_data"].encode("utf-8")) <= 64

@@ -83,6 +83,13 @@ def read_input(url, key):
         "news",
         "id,title,description,source,source_normalized,published,link",
     )
+    registry = fetch_all(
+        url,
+        key,
+        "source_registry",
+        "source_normalized,source_type",
+        order="source_normalized.asc",
+    )
 
     topic_ids = set()
     for topic in topics:
@@ -94,6 +101,25 @@ def read_input(url, key):
 
     article_by_id = {}
     warnings = []
+    source_types = {}
+    for source in registry:
+        if not isinstance(source, dict):
+            raise SupabaseReadError("Source registry contains an invalid row.")
+        key = source.get("source_normalized")
+        source_type = source.get("source_type")
+        if not isinstance(key, str) or not key:
+            raise SupabaseReadError(
+                "Source registry contains an invalid source_normalized."
+            )
+        if source_type not in (None, "media", "authority"):
+            raise SupabaseReadError(
+                f"Source registry contains an invalid source_type for {key}."
+            )
+        if key in source_types:
+            raise SupabaseReadError(
+                f"Source registry contains duplicate source_normalized: {key}."
+            )
+        source_types[key] = source_type
     for article in news:
         if not isinstance(article, dict) or type(article.get("id")) is not int:
             raise SupabaseReadError("News contains an invalid id.")
@@ -127,7 +153,11 @@ def read_input(url, key):
         if link["news_id"] not in article_by_id:
             raise SupabaseReadError("Topic links reference an unknown article.")
         ranking_article = dict(article_by_id[link["news_id"]])
-        ranking_article["source"] = normalize_source(ranking_article.get("source"))
+        normalized_source = ranking_article.get(
+            "source_normalized"
+        ) or normalize_source(ranking_article.get("source"))
+        ranking_article["source"] = normalized_source
+        ranking_article["source_type"] = source_types.get(normalized_source)
         topic_articles[link["topic_id"]].append(ranking_article)
 
     return [
@@ -181,6 +211,9 @@ def run_ranking(*, url, key, write=False, now=None, config=None):
                 half_life_days=config["half_life_days"],
                 default_weight=config["default_source_weight"],
                 previous_days=config["previous_days"],
+                authority_base_factor=config["authority_base_factor"],
+                authority_total_start_factor=config["authority_total_start_factor"],
+                authority_bonus_half_life_days=config["authority_bonus_half_life_days"],
             )
         except (
             ArithmeticError,

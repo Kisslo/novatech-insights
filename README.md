@@ -9,9 +9,50 @@ articles, LinkedIn posts, and videos.
 
 ## Purpose
 
-Increase Novatech Solutions' visibility on Google and LinkedIn
-through relevant content based on current news and the company's
-perspective.
+Novatech aims to become an established voice in Sweden on AI,
+automation and regulation for small businesses. The pipeline
+fetches news globally, selects what concerns Swedish small
+businesses, accounting firms and non-profit organizations, and
+rewrites it with Novatech's angle. The output is articles on
+novatech-solutions.se plus LinkedIn posts and Reels that lead
+there. Kisslo provides the angle and approval from his phone;
+the system does the rest.
+
+## Pipeline Overview
+
+The target workflow has eight steps. Steps 1–3 have working
+implementations in the repository; steps 4–8 are planned.
+
+| Step | Who | Tools | Result |
+|---|---|---|---|
+| 1. Fetch | System | Python, scheduled | New articles in `news` |
+| 2. Group and rank | System | Python | Topics with scores |
+| 3. Select and angle | Kisslo | Telegram | Chosen topic plus his angle |
+| 4. Generate | System | n8n with LLM | Article draft |
+| 5. Edit | Kisslo | Telegram | Approved or changed |
+| 6. Publish | System | n8n | Article on the website |
+| 7. Videofy and review | System, Kisslo | Videofy service, Telegram | Video in Cloudflare R2 |
+| 8. Caption | System | n8n with LLM | Text per channel: LinkedIn and Reels |
+
+The system proposes, Kisslo selects, and his choices guide the
+next selection. No predefined keywords.
+
+Three entry points are planned for the selection:
+
+- The system sends the top 5 every morning in Telegram.
+- Search: a query is turned into an embedding and the nearest
+  articles are fetched.
+- Pasted text: an article, post or Kisslo's own thought is
+  saved with `source = kisslo` and included in the clustering.
+
+## Architecture
+
+Supabase is the meeting place: Python writes articles and topics,
+n8n reads data and sets status. Python exposes a small API for
+search and pasted text that n8n calls. All state lives in
+Supabase; n8n stores nothing of its own. Kisslo posts LinkedIn and
+Reels himself, since LinkedIn does not allow automated posting
+without a partner API.
 
 ## Planned Functionality
 
@@ -26,7 +67,10 @@ perspective.
 - Rank topics using a model trained on Kisslo's ratings.
 - Evaluate the model based on the proportion of suggestions
   Kisslo actually uses.
-- Create short videos from approved articles using Videofy.
+- Create short videos from approved articles using Videofy,
+  with captions per channel for LinkedIn and Reels.
+- Provide a shared overview of pipeline health so failed, skipped
+  and incomplete operations can be identified and investigated.
 
 ## Requirements and Constraints
 
@@ -43,35 +87,22 @@ perspective.
   articles to Videofy and a customer configuration file in JSON
   containing a logo, voice settings, and AI instructions.
 
-## Delivery Milestones
+## Delivery Plan
 
-### Week 1 — Project Foundation
+Each week ends with something Kisslo can review from his phone.
+Dates are proposals; the order is fixed. Generation (step 4) is
+not built until the selection (step 2) gives a good result.
 
-Week 1 is allocated to establishing the project foundation.
+| Week | Scope | Delivery |
+|---|---|---|
+| 44 | Selection: embeddings, clustering and scores | Top 20 with labels, source counts and three links |
+| 45 | Telegram and search: top 5 with Skriv/Skippa, angle saved in `posts`; search and pasted text via the Python API | A selection with angle visible in Supabase |
+| 46 | Writing and publishing: draft with Swedish SME angle to Telegram, publishing on approval | First article published from the phone |
 
-Proposed scope:
-
-- Prepare the shared repository and project documentation.
-- Establish a common foundation for local development
-  and configuration.
-- Clarify responsibilities and how information will be
-  transferred between components.
-
-Stretch goal: complete an initial successful retrieval of a
-news article from a selected source.
-
-The scope and acceptance criteria for successful retrieval
-need to be defined before the test is carried out.
-
-### By the End of Week 2
-
-- At least 30 news sources.
-- The first week's news grouped into topics.
-
-### From Week 5
-
-- Each approved article must also be turned into a short
-  video using Videofy.
+Videofy, captions and the website frontend come after week 46.
+From week 5 of the project, each approved article must also be
+turned into a short video using Videofy; see Requirements and
+Constraints for what that integration must include.
 
 ## Preliminary Responsibility Assignment
 
@@ -80,6 +111,7 @@ need to be defined before the test is carried out.
 | Data | Nosheen | News retrieval, duplicate handling, and results measurement. Python code for transferring articles to Videofy. |
 | Topics | Mathias, Turker | News grouping and an ML model that ranks topics based on Kisslo's ratings. Evaluation of the ranking. |
 | Content | Nedal | Summaries, content drafts, source verification, and the publication workflow. Customer configuration file in JSON for Videofy. |
+| Video | Niclas, Hezil | Videofy integration: delivering approved articles to Videofy, the customer configuration file, and video output to Cloudflare R2. |
 
 The areas follow the project brief. The assignment of individuals
 is preliminary.
@@ -92,41 +124,25 @@ publish content.
 ## Status
 
 News collection, CSV classification, Supabase news uploading,
-semantic grouping, topic summaries and topic-label output have
-implementations in the repository.
+semantic grouping, topic storage with read views and backend
+permissions, topic summaries, topic labels and the top-N list,
+and the Telegram API have implementations in the repository.
+Topic storage and its permissions were merged in PR #39.
 
-Draft PR #39 adds topic storage, read views, optional group saving
-and shared backend permissions. Local and CI tests cover these
-changes, but migrations 002–006 have not been applied to Supabase.
+The source registry `public.source_registry` with `source_type`
+classification (`media`, `authority` or NULL) was added in PR #56.
+Topic ranking supports source-type-based authority weighting.
 
-Live grouping-to-ranking-to-reader integration and deployment
-verification remain pending.
+None of migrations 002–009 have been verified as applied to the
+shared Supabase project. Live grouping-to-ranking-to-reader
+integration and deployment verification remain pending.
 
 See [the data contract](docs/article-data-contract.md) and
 [verification results](docs/topic-storage-verification.md)
 for the current implementation scope and limitations.
 
-## Proposed Initial Grouping Test
-
-The initial proposal grouped news items based on their titles.
-
-Its proposed core fields were:
-
-- title
-- link
-- source
-- publication_date
-
-The implemented article contract uses `published` for the
-publication timestamp. Semantic grouping now uses article titles
-and RSS descriptions.
-
-The initial title-only proposal is historical context, not the
-current grouping implementation.
-
 ## Open Questions
 
-- Selection of tools, services, and integrations.
 - Storage and handling of generated content.
 - Documentation of priority search phrases and services.
 - Topic identity, regrouping and retirement of older groups.
@@ -443,6 +459,31 @@ uv run --locked ruff check .
 ```
 
 ## Topic Ranking
+
+Topics are scored from their articles using source weights, time
+decay, source breadth, velocity and a Swedish-source signal, and
+ranked through the shared calculation in `src/rank_topics.py`.
+Sources classified as `authority` in `public.source_registry` get a
+higher base weight plus a temporary start bonus with its own
+half-life. Media, unclassified and missing sources are ranked with
+the ordinary calculation.
+
+The Supabase adapter `src/rank_topics_supabase.py` reads topics,
+topic articles, news and the source registry, and can save the
+resulting scores back to the database:
+
+```powershell
+uv run python src/rank_topics_supabase.py
+uv run python src/rank_topics_supabase.py --write
+```
+
+Without `--write`, the run only reads and prints rankings. With
+`--write`, only `score`, `score_calculated_at`, `score_version` and
+`score_breakdown` are updated in `topics`. Parameters are configured
+in `config/ranking.json`.
+
+The model trained on Kisslo's ratings is still planned; the current
+ranking uses the configured rule-based calculation.
 
 For details on how topic scores are calculated, see
 [Topic ranking](docs/topic_ranking.md).

@@ -85,6 +85,9 @@ DEFAULT_STANCE = "agree"
 
 SENTENCE_END_PATTERN = re.compile(r"[.!?…]+(?=\s|$)")
 NUMBER_PATTERN = re.compile(r"\d+(?:[.,]\d+)?")
+SAFE_LINK_PATTERN = re.compile(r"https?://[^\s<>\"'\[\]()]+")
+# Sentence ends used to find the claim in front of an [UNVERIFIED] tag.
+CLAIM_START_PATTERN = re.compile(r"[.!?…](?=\s)|\n")
 
 # Kisslo's rules (Insights chat, 13 Nov). Sent in every call to Claude.
 STYLE_GUIDE = """Style guide (Novatech) – follow it in every sentence:
@@ -228,8 +231,8 @@ What to do:
 What you must not do:
 - Do not add facts, figures, examples, names, sources or links
 - Do not change the meaning, Kisslo's angle or Novatech's recommendations
-- Do not remove or move a {tag} tag. A sentence with a {tag} tag may be \
-rewritten but not deleted, and the tag stays right after the same claim
+- Do not change, move or delete a sentence that has a {tag} tag. Leave it \
+exactly as it is, tag included
 - Do not add or remove "# " or "## " headings
 - Do not change anything in the "## {sources}" section
 - Keep "Läs mer: {placeholder}" at the end of the LinkedIn post
@@ -272,8 +275,13 @@ def check_inputs(topic: dict, angle: str, stance: str) -> None:
     if not articles:
         raise ValueError(f"Topic {topic.get('id')} has no articles.")
     for article in articles:
-        if not (article.get("link") or "").strip():
+        link = (article.get("link") or "").strip()
+        if not link:
             raise ValueError(f"Article {article.get('news_id')} has no link.")
+        if not SAFE_LINK_PATTERN.fullmatch(link):
+            raise ValueError(
+                f"Article {article.get('news_id')} has a link that cannot be used."
+            )
 
 
 def source_news_ids(topic: dict) -> list[int]:
@@ -284,16 +292,26 @@ def source_news_ids(topic: dict) -> list[int]:
 # -------------------- prompt
 
 
+def safe_text(text: str) -> str:
+    """Text from outside (RSS, Telegram) made safe to put inside a prompt tag.
+
+    "<" and ">" become "‹" and "›", so a title or description that contains
+    for example "</source>" cannot close the tag and smuggle in instructions.
+    Line breaks become spaces, so one field cannot look like several.
+    """
+    return " ".join(text.replace("<", "‹").replace(">", "›").split())
+
+
 def build_sources_block(articles: list[dict]) -> str:
     """Wrap each article in <source> tags with publication, title, link, text."""
     blocks = []
     for article in articles:
-        description = (article.get("description") or "").strip() or "No description"
+        description = safe_text(article.get("description") or "") or "No description"
         blocks.append(
-            f'<source id="{article["news_id"]}">\n'
-            f"Publication: {article.get('source') or 'unknown'}\n"
-            f"Title: {article.get('title') or 'unknown'}\n"
-            f"Link: {article['link']}\n"
+            f'<source id="{int(article["news_id"])}">\n'
+            f"Publication: {safe_text(article.get('source') or '') or 'unknown'}\n"
+            f"Title: {safe_text(article.get('title') or '') or 'unknown'}\n"
+            f"Link: {article['link'].strip()}\n"
             f"Description: {description}\n"
             "</source>"
         )
@@ -303,12 +321,12 @@ def build_sources_block(articles: list[dict]) -> str:
 def build_draft_prompt(topic: dict, angle: str, stance: str) -> str:
     """Insert the topic, its articles, the angle and the style guide."""
     return DRAFT_PROMPT_TEMPLATE.format(
-        angle=angle.strip(),
+        angle=angle.strip().replace("<", "‹").replace(">", "›"),
         stance=stance,
         stance_instruction=STANCE_INSTRUCTIONS[stance],
         style_guide=STYLE_GUIDE,
-        label=topic["label"].strip(),
-        why_relevant=(topic.get("why_relevant_sv") or "").strip() or "Not given",
+        label=safe_text(topic["label"]),
+        why_relevant=safe_text(topic.get("why_relevant_sv") or "") or "Not given",
         sources_block=build_sources_block(topic["articles"]),
         write_min_words=WRITE_MIN_WORDS,
         max_words=ARTICLE_MAX_WORDS,
@@ -482,31 +500,57 @@ def links_in(text: str) -> set[str]:
     return {link.rstrip(".,;/") for link in LINK_PATTERN.findall(text)}
 
 
+def unverified_claims(text: str) -> list[str]:
+    """The claim in front of each [UNVERIFIED] tag, in order.
+
+    A claim is the text from the start of its sentence (or line) up to the
+    tag, with spaces normalized. A tag written after the full stop, as in
+    "Claim. [UNVERIFIED]", belongs to the sentence before it.
+    """
+    claims = []
+    for match in re.finditer(re.escape(UNVERIFIED_TAG), text):
+        before = text[: match.start()].rstrip().rstrip(".!?…")
+        starts = [m.end() for m in CLAIM_START_PATTERN.finditer(before)]
+        claim = before[starts[-1] :] if starts else before
+        claims.append(" ".join(claim.split()))
+    return claims
+
+
+def is_in_order(shorter: list[str], longer: list[str]) -> bool:
+    """True if `shorter` is `longer` with some items left out, order kept."""
+    remaining = iter(longer)
+    return all(item in remaining for item in shorter)
+
+
+def headings(text: str) -> list[str]:
+    """All Markdown heading lines, in order."""
+    return [line.strip() for line in text.splitlines() if line.startswith("#")]
+
+
 def review_problems(before: str, after: str) -> list[str]:
     """Reasons why a reviewed text must not replace the text from call 1.
 
     The review may only remove or tighten. It must not add links, figures or
-    length, and it must leave [UNVERIFIED] tags, headings and the source list
-    alone. An empty list means the reviewed text is safe to use.
+    length. Sentences with [UNVERIFIED] tags, the headings and the source
+    list must stay exactly as they were. Figures may disappear when a
+    sentence is removed, but not change or swap places. An empty list means
+    the reviewed text is safe to use.
     """
     problems = []
     if links_in(after) != links_in(before):
         problems.append("links were added or removed")
-    if after.count(UNVERIFIED_TAG) != before.count(UNVERIFIED_TAG):
-        problems.append(f"the number of {UNVERIFIED_TAG} tags changed")
+    if unverified_claims(after) != unverified_claims(before):
+        problems.append(
+            f"a sentence with an {UNVERIFIED_TAG} tag was changed, moved or removed"
+        )
     if after.count(LINK_PLACEHOLDER) != before.count(LINK_PLACEHOLDER):
         problems.append(f"the {LINK_PLACEHOLDER} placeholder changed")
-    new_numbers = set(NUMBER_PATTERN.findall(after)) - set(
-        NUMBER_PATTERN.findall(before)
-    )
-    if new_numbers:
-        problems.append(f"new figures were added: {', '.join(sorted(new_numbers))}")
+    if not is_in_order(NUMBER_PATTERN.findall(after), NUMBER_PATTERN.findall(before)):
+        problems.append("figures were added, changed or moved")
     if sources_section(after) != sources_section(before):
         problems.append("the source list changed")
-    headings_before = sum(1 for line in before.splitlines() if line.startswith("#"))
-    headings_after = sum(1 for line in after.splitlines() if line.startswith("#"))
-    if headings_after != headings_before:
-        problems.append("headings were added or removed")
+    if headings(after) != headings(before):
+        problems.append("headings were added, removed or changed")
     if count_words(after) > count_words(before) * MAX_REVIEW_GROWTH:
         problems.append("the text got longer")
     return problems

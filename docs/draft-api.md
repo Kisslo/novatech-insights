@@ -64,14 +64,16 @@ What the endpoint reads:
    be linked, and every factual claim the sources do not support, including
    figures, times and costs, is tagged `[UNVERIFIED]`. The article is written
    as Novatech and never names Kisslo; the LinkedIn post is written as him.
+   Text from the news (title, publication, description) and the topic label
+   come from outside, so `<` and `>` in them are replaced with `‹` and `›`
+   before they go into the prompt; they cannot close a tag and add
+   instructions. Links must be plain `http(s)` links.
 3. **Call 2, review.** The same style guide again. The review only removes
    AI-sounding phrasing, repetition and sentences about the sources or the
    writing. It must not add facts, figures, links or length.
 4. **Guard.** The code compares the text before and after the review. If the
-   review changed a link, the source list, a heading, an `[UNVERIFIED]` tag
-   or the `[LÄNK]` placeholder, added a figure, or made the text more than
-   5 % longer, the text from call 1 is kept for that part and a warning is
-   added. The article and the LinkedIn post are checked separately.
+   review added or removed a link, changed the source list, a heading, a sentence with an `[UNVERIFIED]` tag or the `[LÄNK]` placeholder, added, changed or moved a figure (removing one with its sentence is allowed), or made the text more than 5 % longer, the text from call 1 is kept for that
+   part and a warning is added. The article and the LinkedIn post are checked separately.
 5. **Checks.** Length (500–800 words), 3–4 sections, a headline, 3–5
    LinkedIn sentences, the `[LÄNK]` placeholder, links only to the given
    sources, no reviewer notes and no "Kisslo" in the texts. Problems become

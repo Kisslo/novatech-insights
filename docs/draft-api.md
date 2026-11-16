@@ -3,8 +3,8 @@
 `POST /drafts/{post_id}` writes a Swedish article draft and a LinkedIn post
 for a topic that Kisslo has chosen in Telegram and given his angle on
 (issue #30). n8n calls it after the angle is saved in `posts`; the endpoint
-writes the draft, reviews it, saves it as a new version and returns a short
-preview that n8n can send to Telegram. Decided at standup 13 Nov: the
+writes the draft, reviews it, saves it as a new version and returns ready
+Telegram messages that n8n sends in order. Decided at standup 13 Nov: the
 generation runs in Python and n8n only calls the endpoint.
 
 ```text
@@ -15,7 +15,7 @@ Skriv + angle  --->   posts: angle_received  --->  POST /drafts/{post_id}
                                                    3. Claude call 2: review
                                                    4. save version in post_drafts,
                                                       posts.status = draft_generated
-Kisslo reads   <---   sends preview          <---  returns texts + preview
+Kisslo reads   <---   sends messages (Loop)  <---  returns texts + messages
 ```
 
 The endpoint lives in `src/draft_api.py` and is part of the same FastAPI app
@@ -103,15 +103,20 @@ Example from `tests/fixtures/sample_posts.json` (shortened):
   "stats": {"words": 531, "sections": 4, "linkedin_sentences": 4, "unverified": 0},
   "warnings": [],
   "cost_usd": 0.0546,
-  "preview": {
-    "text": "<b>Utkast v3: Skriv ner var ni använder AI innan reglerna är klara</b>\n\nMånga småföretag i Sverige väntar …\n\n<b>LinkedIn</b>\nMånga småföretag väntar …\n\nOrd: 531 · Avsnitt: 4 · [UNVERIFIED]: 0 · Varningar: 0",
-    "parse_mode": "HTML",
-    "buttons": [
-      {"text": "Publicera", "callback_data": "publish:1:3"},
-      {"text": "Ändra", "callback_data": "revise:1:3"},
-      {"text": "Skippa", "callback_data": "keep:1:3"}
-    ]
-  },
+  "messages": [
+    {"text": "<b>Utkast v3 · Artikel</b>\n\n<b>Skriv ner var ni använder AI innan reglerna är klara</b>\n\nMånga småföretag i Sverige väntar …", "parse_mode": "HTML"},
+    {"text": "<b>Utkast v3 · LinkedIn</b>\n\nMånga småföretag väntar … Läs mer: [LÄNK]", "parse_mode": "HTML"},
+    {"text": "<b>Utkast v3 · Anteckningar för granskning (publiceras inte)</b>\n\n<b>Notes for reviewer (never published)</b>\n\n…", "parse_mode": "HTML"},
+    {
+      "text": "<b>Utkast v3: Skriv ner var ni använder AI innan reglerna är klara</b>\n\nOrd: 531 · Avsnitt: 4 · [UNVERIFIED]: 0 · Varningar: 0\n\nLäs utkastet ovan och välj Publicera, Ändra eller Skippa.",
+      "parse_mode": "HTML",
+      "buttons": [
+        {"text": "Publicera", "callback_data": "publish:1:3"},
+        {"text": "Ändra", "callback_data": "revise:1:3"},
+        {"text": "Skippa", "callback_data": "keep:1:3"}
+      ]
+    }
+  ],
   "article": "# Skriv ner var ni använder AI innan reglerna är klara\n\n…\n\n## Källor\n- …",
   "linkedin": "Många småföretag väntar … \n\nLäs mer: [LÄNK]",
   "reviewer_notes": "# Notes for reviewer (never published)\n\n## Automatic checks\n…",
@@ -128,8 +133,8 @@ Example from `tests/fixtures/sample_posts.json` (shortened):
 | `stats.unverified` | Number of `[UNVERIFIED]` tags. They must be resolved before approval |
 | `warnings` | Results of the checks. A draft with warnings is still saved |
 | `cost_usd` | Real cost of both calls |
-| `preview` | Short Telegram message (HTML): headline, intro, LinkedIn text and the numbers. The whole article does not fit in one Telegram message (4,096 characters) |
-| `preview.buttons` | Three buttons: **Publicera** `publish:<post_id>:<version>`, **Ändra** `revise:<post_id>:<version>`, **Skippa** `keep:<post_id>:<version>` (see below) |
+| `messages` | Telegram messages (HTML) to send in this order: the article, the LinkedIn post and the reviewer notes, each in one or more parts (marked "(1/2)" and so on) under Telegram's limit of 4,096 characters, and last a short message with the numbers and the buttons (see below) |
+| `messages[-1].buttons` | Three buttons: **Publicera** `publish:<post_id>:<version>`, **Ändra** `revise:<post_id>:<version>`, **Skippa** `keep:<post_id>:<version>`. Only the last message has buttons |
 | `article`, `linkedin` | Full texts in Markdown. `[LÄNK]` is replaced with the article's link when it is published |
 | `reviewer_notes` | For Kisslo, never published |
 
@@ -159,7 +164,11 @@ creates the next version.
 ## Buttons under the draft
 
 Decided 16 Nov: Kisslo gets three buttons under each draft in Telegram.
-The API only returns them; n8n sends them and handles the presses.
+Agreed with Turker the same day: Kisslo first gets the whole draft – the
+article, the LinkedIn post and the reviewer notes – and the buttons come
+in the last message, so he reads everything before he chooses. Headings and
+`**bold**` are shown in bold; everything else is escaped text. The API only
+returns the messages; n8n sends them and handles the presses.
 
 | Button | `callback_data` | What happens | Status |
 |---|---|---|---|
@@ -244,7 +253,9 @@ uv run python src/draft_article.py --topic-id 101 --angle "Småföretag ska inte
   with headers `X-API-Key: <key>` (n8n credential) and
   `ngrok-skip-browser-warning: 1`, body `{"stance": "agree"}` or
   `{"stance": "rebut"}`, timeout at least 120 seconds.
-- **Telegram node:** text `{{ $json.preview.text }}`, parse mode HTML, and three inline buttons from `preview.buttons`.
+- **Loop over `messages`** in order. **Telegram node** per message: text
+  `{{ $json.text }}`, parse mode HTML, and inline buttons from
+  `{{ $json.buttons }}` when the message has them (only the last one).
 - On 409 or 502, tell Kisslo that the draft could not be written; on 502 a
   new try is safe.
 

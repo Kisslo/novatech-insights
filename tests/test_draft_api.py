@@ -7,7 +7,14 @@ from fastapi.testclient import TestClient
 import draft_api
 import draft_store
 from content_tools import ClaudeError
-from draft_api import draft_buttons, format_preview, headline_and_intro
+from draft_api import (
+    draft_buttons,
+    format_decision,
+    format_messages,
+    headline_and_intro,
+    markdown_blocks,
+    split_into_parts,
+)
 from draft_article import REVIEW_SYSTEM_PROMPT, STANCES, STYLE_GUIDE
 from draft_store import StoreError
 from telegram_api import app
@@ -178,7 +185,9 @@ def test_draft_is_written_reviewed_saved_and_returned(claude, tmp_path):
     assert "Bara för granskaren" in data["reviewer_notes"]
     assert "Strök en floskel" in data["reviewer_notes"]
     assert "Bara för granskaren" not in data["article"] + data["linkedin"]
-    assert "Bara för granskaren" not in data["preview"]["text"]
+    texts = [m["text"] for m in data["messages"]]
+    assert "Bara för granskaren" in texts[2]  # the notes have their own message
+    assert not any("Bara för granskaren" in t for t in texts[:2] + texts[3:])
     # One saved version with the same content.
     assert saved_files(tmp_path) == ["post_1_v1.json"]
     saved = json.loads(
@@ -191,21 +200,32 @@ def test_draft_is_written_reviewed_saved_and_returned(claude, tmp_path):
     assert saved["stance"] == "agree"
 
 
-def test_preview_is_a_short_telegram_message(claude):
-    preview = post_draft(1).json()["preview"]
+def test_messages_are_article_linkedin_notes_then_buttons(claude):
+    messages = post_draft(1).json()["messages"]
 
-    assert preview["parse_mode"] == "HTML"
-    assert preview["text"] == (
+    assert [m["parse_mode"] for m in messages] == ["HTML"] * 4
+    assert messages[0]["text"].startswith(
+        "<b>Utkast v1 · Artikel</b>\n\n<b>AI-regler: börja nu</b>\n\n"
+        "Ingressen säger det viktigaste &lt;först&gt;."
+    )
+    assert "<b>Avsnitt 1</b>" in messages[0]["text"]
+    assert messages[1]["text"] == (
+        "<b>Utkast v1 · LinkedIn</b>\n\n"
+        "Första meningen. Andra meningen. Tredje meningen. Läs mer: [LÄNK]"
+    )
+    assert messages[2]["text"].startswith(
+        "<b>Utkast v1 · Anteckningar för granskning (publiceras inte)</b>"
+    )
+    assert messages[3]["text"] == (
         "<b>Utkast v1: AI-regler: börja nu</b>\n"
         "\n"
-        "Ingressen säger det viktigaste &lt;först&gt;.\n"
+        "Ord: 611 · Avsnitt: 3 · [UNVERIFIED]: 0 · Varningar: 0\n"
         "\n"
-        "<b>LinkedIn</b>\n"
-        "Första meningen. Andra meningen. Tredje meningen. Läs mer: [LÄNK]\n"
-        "\n"
-        "Ord: 611 · Avsnitt: 3 · [UNVERIFIED]: 0 · Varningar: 0"
+        "Läs utkastet ovan och välj Publicera, Ändra eller Skippa."
     )
-    assert preview["buttons"] == [
+    # Only the last message has buttons, and they name this version.
+    assert [("buttons" in m) for m in messages] == [False, False, False, True]
+    assert messages[3]["buttons"] == [
         {"text": "Publicera", "callback_data": "publish:1:1"},
         {"text": "Ändra", "callback_data": "revise:1:1"},
         {"text": "Skippa", "callback_data": "keep:1:1"},
@@ -216,7 +236,7 @@ def test_buttons_follow_the_new_version(claude):
     post_draft(3)
     second = post_draft(3).json()
 
-    assert [b["callback_data"] for b in second["preview"]["buttons"]] == [
+    assert [b["callback_data"] for b in second["messages"][-1]["buttons"]] == [
         "publish:3:2",
         "revise:3:2",
         "keep:3:2",
@@ -304,7 +324,7 @@ def test_failed_review_still_saves_the_draft_with_a_warning(monkeypatch, tmp_pat
 
     assert data["reviewed"] is False
     assert "Review step failed" in data["warnings"][0]
-    assert "texten är inte granskad" in data["preview"]["text"]
+    assert "texten är inte granskad" in data["messages"][-1]["text"]
     assert saved_files(tmp_path) == ["post_1_v1.json"]
 
 
@@ -376,7 +396,7 @@ def test_second_request_for_the_same_post_is_refused(claude, tmp_path):
     assert post_draft(3).status_code == 200  # other posts are not blocked
 
 
-# -------------------- preview helpers
+# -------------------- message helpers
 
 
 def test_headline_and_intro():
@@ -388,20 +408,68 @@ def test_headline_and_intro():
     assert headline_and_intro("") == ("", "")
 
 
-def test_format_preview_shortens_long_texts_and_stays_within_telegram_limit():
+def test_markdown_blocks_makes_headings_and_bold_and_escapes_the_rest():
+    markdown = "# Rubrik <x>\n\nText & mer.\n\n## Råd\n\n1. **Gör en lista.** Nu."
+
+    assert markdown_blocks(markdown) == [
+        "<b>Rubrik &lt;x&gt;</b>",
+        "Text &amp; mer.",
+        "<b>Råd</b>",
+        "1. <b>Gör en lista.</b> Nu.",
+    ]
+
+
+def test_split_into_parts_cuts_between_paragraphs():
+    paragraphs = [f"Stycke {i}. " + "ord " * 20 for i in range(10)]
+    parts = split_into_parts("\n\n".join(paragraphs), limit=300)
+
+    assert len(parts) > 1
+    assert all(len(part) <= 300 for part in parts)
+    assert "\n\n".join(parts) == "\n\n".join(p.rstrip() for p in paragraphs)
+
+
+def test_split_into_parts_cuts_a_too_long_paragraph_without_open_tags():
+    parts = split_into_parts("**" + "fet " * 200 + "**", limit=100)
+
+    assert len(parts) > 1
+    assert all(len(part) <= 100 for part in parts)
+    assert not any("<b>" in part or "</b>" in part for part in parts)
+
+
+def test_long_draft_becomes_numbered_parts_within_telegram_limit():
+    article = "# Rubrik\n\n" + "\n\n".join("Mening med ord. " * 30 for _ in range(30))
     draft = {
-        "article": "# " + "R" * 500 + "\n\n" + "i" * 5000,
-        "linkedin": "l" * 5000,
+        "article": article,
+        "linkedin": "Kort. Läs mer: [LÄNK]",
         "stats": {"words": 1, "sections": 0, "linkedin_sentences": 1, "unverified": 2},
         "warnings": ["a", "b"],
         "reviewed": True,
     }
 
-    text = format_preview(draft, 1, 3)["text"]
+    messages = format_messages(draft, "- Not.", 1, 3)
 
-    assert len(text) < 4096
+    article_parts = [m for m in messages if "· Artikel" in m["text"]]
+    assert len(article_parts) > 1
+    assert article_parts[0]["text"].startswith(
+        f"<b>Utkast v3 · Artikel (1/{len(article_parts)})</b>"
+    )
+    assert all(len(m["text"]) <= 4096 for m in messages)
+    assert "[UNVERIFIED]: 2 · Varningar: 2" in messages[-1]["text"]
+
+
+def test_format_decision_shortens_a_long_headline():
+    draft = {
+        "article": "# " + "R" * 500 + "\n\nText",
+        "linkedin": "",
+        "stats": {"words": 1, "sections": 0, "linkedin_sentences": 0, "unverified": 0},
+        "warnings": [],
+        "reviewed": True,
+    }
+
+    text = format_decision(draft, 1, 3)["text"]
+
     assert text.startswith("<b>Utkast v3: RRR")
-    assert "[UNVERIFIED]: 2 · Varningar: 2" in text
+    assert len(text.split("\n")[0]) < 230
 
 
 def test_draft_buttons_do_not_reuse_the_topic_prefixes():

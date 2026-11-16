@@ -10,8 +10,9 @@ key check. What one call does:
    and check that a draft can be saved.
 2. Write and review the draft with two Claude calls (draft_article.py).
 3. Save the draft as a new version and set status draft_generated.
-4. Return the texts and a short preview that n8n can send to Telegram,
-   with the buttons Publicera, Ändra and Skippa.
+4. Return the texts and a list of ready Telegram messages: the article,
+   the LinkedIn post and the reviewer notes in parts that fit Telegram, and
+   last a message with the buttons Publicera, Ändra and Skippa.
 
 Answers:
     200  draft saved (or dry run)
@@ -33,6 +34,7 @@ settings in draft_store.py.
 
 import logging
 import os
+import re
 import threading
 from typing import Literal
 
@@ -73,9 +75,11 @@ from telegram_format import (
     shorten,
 )
 
-MAX_PREVIEW_HEADLINE_CHARS = 200
-MAX_PREVIEW_INTRO_CHARS = 600
-MAX_PREVIEW_LINKEDIN_CHARS = 1500
+MAX_HEADLINE_CHARS = 200
+# Room under Telegram's limit of 4,096 characters for the part's title line.
+MAX_PART_CHARS = MAX_MESSAGE_CHARS - 200
+HEADING_PATTERN = re.compile(r"#{1,6}\s+(.*)")
+BOLD_PATTERN = re.compile(r"\*\*(.+?)\*\*")
 
 
 # Buttons under the draft in Telegram (decided 16 Nov). n8n handles the
@@ -155,23 +159,72 @@ def draft_buttons(post_id: int, version: int) -> list[dict]:
     return buttons
 
 
-def format_preview(draft: dict, post_id: int, version: int) -> dict:
-    """A short Telegram message (HTML) about the draft: headline, intro,
-    LinkedIn text and the numbers Kisslo needs before he opens the full text,
-    with the buttons Publicera, Ändra and Skippa.
+def markdown_blocks(markdown: str) -> list[str]:
+    """Markdown as Telegram HTML, one block per paragraph.
 
-    Text is shortened first and escaped afterwards, like in telegram_format.
+    Headings and **bold** become <b>; everything else is escaped text, so
+    nothing in the draft can be read as a Telegram tag.
     """
-    headline, intro = headline_and_intro(draft["article"])
+    blocks = []
+    for paragraph in re.split(r"\n\s*\n", markdown.strip()):
+        lines = []
+        for line in paragraph.splitlines():
+            heading = HEADING_PATTERN.fullmatch(line.strip())
+            if heading:
+                lines.append(f"<b>{escape_html(heading.group(1))}</b>")
+            else:
+                lines.append(BOLD_PATTERN.sub(r"<b>\1</b>", escape_html(line.rstrip())))
+        blocks.append("\n".join(lines))
+    return blocks
+
+
+def split_long_block(block: str, limit: int) -> list[str]:
+    """Cut a block longer than `limit` at line breaks, or at spaces.
+
+    A single line that is still too long loses its <b> tags first, so a cut
+    can never leave a tag open.
+    """
+    pieces, current = [], ""
+    for line in block.split("\n"):
+        if len(line) > limit:
+            line = line.replace("<b>", "").replace("</b>", "")
+        words = line.split(" ") if len(line) > limit else [line]
+        for i, word in enumerate(words):
+            joiner = "" if not current else ("\n" if i == 0 else " ")
+            if current and len(current) + len(joiner) + len(word) > limit:
+                pieces.append(current)
+                current, joiner = "", ""
+            current += joiner + word[:limit]
+    if current:
+        pieces.append(current)
+    return pieces
+
+
+def split_into_parts(markdown: str, limit: int = MAX_PART_CHARS) -> list[str]:
+    """Markdown as Telegram HTML parts of at most `limit` characters.
+
+    Parts are cut between paragraphs, so a paragraph is only cut when it is
+    longer than a whole part.
+    """
+    parts, current = [], ""
+    for block in markdown_blocks(markdown):
+        for piece in split_long_block(block, limit) if len(block) > limit else [block]:
+            if current and len(current) + 2 + len(piece) > limit:
+                parts.append(current)
+                current = ""
+            current = f"{current}\n\n{piece}" if current else piece
+    if current:
+        parts.append(current)
+    return parts
+
+
+def format_decision(draft: dict, post_id: int, version: int) -> dict:
+    """The last message: the numbers and the buttons Publicera, Ändra, Skippa."""
+    headline, _ = headline_and_intro(draft["article"])
     stats = draft["stats"]
-    title = shorten(headline or "Utan rubrik", MAX_PREVIEW_HEADLINE_CHARS)
+    title = shorten(headline or "Utan rubrik", MAX_HEADLINE_CHARS)
     lines = [
         f"<b>Utkast v{version}: {escape_html(title)}</b>",
-        "",
-        escape_html(shorten(intro, MAX_PREVIEW_INTRO_CHARS)),
-        "",
-        "<b>LinkedIn</b>",
-        escape_html(shorten(draft["linkedin"], MAX_PREVIEW_LINKEDIN_CHARS)),
         "",
         f"Ord: {stats['words']}"
         f" · Avsnitt: {stats['sections']}"
@@ -180,12 +233,38 @@ def format_preview(draft: dict, post_id: int, version: int) -> dict:
     ]
     if not draft["reviewed"]:
         lines.append("Obs: granskningssteget misslyckades, texten är inte granskad.")
-    text = "\n".join(lines)
+    lines += ["", "Läs utkastet ovan och välj Publicera, Ändra eller Skippa."]
     return {
-        "text": text[:MAX_MESSAGE_CHARS],
+        "text": "\n".join(lines),
         "parse_mode": "HTML",
         "buttons": draft_buttons(post_id, version),
     }
+
+
+def format_messages(
+    draft: dict, reviewer_notes: str, post_id: int, version: int
+) -> list[dict]:
+    """All Telegram messages for one draft, in the order n8n sends them.
+
+    First the article, then the LinkedIn post, then the reviewer notes, each
+    split into parts that fit in one Telegram message, and last a short
+    message with the buttons. Kisslo reads everything before he chooses, and
+    the buttons name the exact version he read (decided with Turker 16 Nov).
+    """
+    sections = [
+        ("Artikel", draft["article"]),
+        ("LinkedIn", draft["linkedin"]),
+        ("Anteckningar för granskning (publiceras inte)", reviewer_notes),
+    ]
+    messages = []
+    for title, text in sections:
+        parts = split_into_parts(text)
+        for number, part in enumerate(parts, start=1):
+            count = f" ({number}/{len(parts)})" if len(parts) > 1 else ""
+            header = f"<b>Utkast v{version} · {title}{count}</b>"
+            messages.append({"text": f"{header}\n\n{part}", "parse_mode": "HTML"})
+    messages.append(format_decision(draft, post_id, version))
+    return messages
 
 
 def read_post_and_topic(source: str, post_id: int) -> tuple[dict, dict]:
@@ -294,7 +373,9 @@ def create_draft(
         "stats": draft["stats"],
         "warnings": draft["warnings"],
         "cost_usd": None if draft["cost"] is None else round(draft["cost"], 4),
-        "preview": format_preview(draft, post_id, saved["version"]),
+        "messages": format_messages(
+            draft, row["reviewer_notes"], post_id, saved["version"]
+        ),
         "article": draft["article"],
         "linkedin": draft["linkedin"],
         "reviewer_notes": row["reviewer_notes"],

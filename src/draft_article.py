@@ -68,8 +68,9 @@ DEFAULT_EFFORT = "low"  # low / medium / high; low = least thinking, cheapest
 DEFAULT_MODEL = "claude-sonnet-5-5"
 DEFAULT_AUTHOR = "Kisslo Shek"
 
-WRITE_MIN_WORDS = 600
+ARTICLE_MIN_WORDS = 500
 ARTICLE_MAX_WORDS = 800
+WRITE_MIN_WORDS = 600  # call 1 aims higher, because the review step cuts text
 MIN_SECTIONS = 3
 MAX_SECTIONS = 4
 LINKEDIN_MIN_SENTENCES = 3
@@ -142,6 +143,7 @@ own recommendations, ending with a short closing paragraph; then "## {sources}" 
 one line per source you used: "- <publication>: <title> – <link>". Do not add any \
 other "## " section, such as a separate conclusion
 - Do not write an author line; it is added later
+- Kisslo's angle is the core; the news are examples
 - Kisslo is the author. Write as Novatech ("vi") and never mention Kisslo by \
 name, neither in the article nor in the LinkedIn post
 - The sources are short descriptions, not full articles. Use only what they say
@@ -158,8 +160,12 @@ Kisslo's angle and also in the headline
 - If the sources are short, reach the word count with Kisslo's angle and \
 Novatech's own analysis and recommendations, never with new facts
 - Do not copy sentences from the sources
-- Clearly separate Novatech's own recommendations from what the sources say
-- Never write notes about the sources or your process in the article text
+- Clearly separate Novatech's own recommendations from what the sources say. \
+Show Novatech's own view with phrasing such as "Vi menar" or "Vår bedömning är", \
+and the sources' facts by naming the publication
+- Never write about the sources, the text or your process in the article, for \
+example "Källorna är korta" or "det här är en egen slutsats"; such notes go in \
+the reviewer notes
 
 LinkedIn rules:
 - {min_sentences}–{max_sentences} sentences in Swedish, no headline, written \
@@ -212,6 +218,8 @@ What to look for:
 "I dagens snabbrörliga värld", "Sammanfattningsvis"), rhetorical questions that \
 are answered right away, lists of three used only for rhythm, a point that is \
 made twice
+- Sentences about the sources, the text or how it was written (for example \
+"Källorna är korta" or "det är en egen slutsats"). Delete them
 
 What to do:
 - Delete the sentence, or rewrite it shorter and more directly. Prefer deleting
@@ -412,10 +420,10 @@ def check_draft(parts: dict[str, str], articles: list[dict]) -> list[str]:
     """Check length, structure, tags and links. Returns warnings for the reviewer."""
     warnings = []
     words = count_words(article_body(parts["article"]))
-    if not WRITE_MIN_WORDS <= words <= ARTICLE_MAX_WORDS:
+    if not ARTICLE_MIN_WORDS <= words <= ARTICLE_MAX_WORDS:
         warnings.append(
             f"Article has {words} words "
-            f"(expected {WRITE_MIN_WORDS}–{ARTICLE_MAX_WORDS})."
+            f"(expected {ARTICLE_MIN_WORDS}–{ARTICLE_MAX_WORDS})."
         )
     sections = count_sections(parts["article"])
     if not MIN_SECTIONS <= sections <= MAX_SECTIONS:
@@ -614,7 +622,8 @@ def build_notes_file(
         "# Notes for reviewer (never published)",
         "",
         "## Automatic checks",
-        f"- Words in article: {stats['words']} ({WRITE_MIN_WORDS}–{ARTICLE_MAX_WORDS})",
+        f"- Words in article: {stats['words']} "
+        f"({ARTICLE_MIN_WORDS}–{ARTICLE_MAX_WORDS})",
         f"- Sections: {stats['sections']} ({MIN_SECTIONS}–{MAX_SECTIONS})",
         f"- LinkedIn sentences: ~{stats['linkedin_sentences']} "
         f"({LINKEDIN_MIN_SENTENCES}–{LINKEDIN_MAX_SENTENCES})",

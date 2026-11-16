@@ -150,6 +150,8 @@ def test_build_draft_prompt_contains_angle_topic_sources_and_rules():
     assert "never mention Kisslo by name" in prompt
     assert "how long something takes or what it costs" in prompt
     assert "It does not count as one of the sentences" in prompt
+    assert '"Vår bedömning är"' in prompt
+    assert 'example "Källorna är korta"' in prompt
     assert "[UNVERIFIED]" in prompt
     assert "never add other links" in prompt
     assert "also when they come from Kisslo's angle" in prompt
@@ -181,6 +183,7 @@ def test_build_review_prompt_includes_style_guide_texts_and_limits():
     assert "Do not add facts, figures, examples, names, sources or links" in prompt
     assert "Do not remove or move a [UNVERIFIED] tag" in prompt
     assert 'Do not change anything in the "## Källor" section' in prompt
+    assert "Sentences about the sources, the text or how it was written" in prompt
 
 
 # -------------------- answer
@@ -253,6 +256,13 @@ def test_count_linkedin_sentences_leaves_out_the_link_line():
     assert count_linkedin_sentences(LINKEDIN) == 3
     assert count_linkedin_sentences("En. Två. Tre. Fyra. Fem.\n\nLäs mer: [LÄNK]") == 5
     assert count_linkedin_sentences("Utan länkrad. Två meningar.") == 2
+
+
+def test_check_draft_limit_is_500_words_although_call_1_aims_for_600():
+    parts = parse_response(make_response(article=make_article(words_per_section=128)))
+
+    assert draft_stats(parts)["words"] == 524
+    assert check_draft(parts, TOPIC["articles"]) == []
 
 
 def test_check_draft_warns_when_kisslo_is_named():

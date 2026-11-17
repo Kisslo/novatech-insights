@@ -549,6 +549,92 @@ def test_calculate_run_status(kwargs, expected):
     assert adapter.calculate_run_status(**kwargs) == expected
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [("read_only", "no_data"), ("write", "no_data")],
+)
+def test_calculate_run_status_with_no_topics(mode, expected):
+    assert (
+        adapter.calculate_run_status(
+            mode=mode,
+            topics_total=0,
+            calculated=[],
+            skipped={},
+            calculation_errors={},
+            writes_confirmed=[],
+            writes_failed=[],
+            run_error=None,
+        )
+        == expected
+    )
+
+
+def test_calculate_run_status_write_success():
+    assert (
+        adapter.calculate_run_status(
+            mode="write",
+            topics_total=2,
+            calculated=[1, 2],
+            skipped={},
+            calculation_errors={},
+            writes_confirmed=[1, 2],
+            writes_failed=[],
+            run_error=None,
+        )
+        == "success"
+    )
+
+
+def test_calculate_run_status_all_ranking_writes_fail_but_cleanup_succeeds():
+    assert (
+        adapter.calculate_run_status(
+            mode="write",
+            topics_total=3,
+            calculated=[1, 2],
+            skipped={3: "no valid articles"},
+            calculation_errors={},
+            writes_confirmed=[3],
+            writes_failed=[1, 2],
+            run_error=None,
+        )
+        == "failed"
+    )
+
+
+@pytest.mark.parametrize("mode", ["read_only", "write"])
+def test_calculate_run_status_all_topics_have_calculation_errors(mode):
+    assert (
+        adapter.calculate_run_status(
+            mode=mode,
+            topics_total=2,
+            calculated=[],
+            skipped={},
+            calculation_errors={"1": "bad", "2": "bad"},
+            writes_confirmed=[],
+            writes_failed=[],
+            run_error=None,
+        )
+        == "failed"
+    )
+
+
+def test_calculate_run_status_warnings_alone_do_not_change_status():
+    assert (
+        adapter.calculate_run_status(
+            mode="read_only",
+            topics_total=1,
+            calculated=[1],
+            skipped={},
+            calculation_errors={},
+            writes_confirmed=[],
+            writes_failed=[],
+            run_error=None,
+            warnings=["normalization warning"],
+        )
+        == "success"
+    )
+
+
 def test_start_monitoring_failure_aborts_before_ranking(monkeypatch):
     calls = []
 
@@ -584,3 +670,31 @@ def test_finish_monitoring_failure_is_separate_from_ranking_result(monkeypatch, 
     assert result["status"] == "partial"
     assert result["monitoring_error"]
     assert "Ranking monitoring error" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "run_error",
+    ["Supabase request failed: unavailable", "Ranking configuration is invalid"],
+)
+def test_main_reports_run_error_and_returns_failure(monkeypatch, capsys, run_error):
+    monkeypatch.setenv("SUPABASE_URL", "https://example.test")
+    monkeypatch.setenv("SUPABASE_KEY", "secret")
+    monkeypatch.setattr(
+        adapter,
+        "run_ranking",
+        lambda **kwargs: {
+            "run_id": "run-1",
+            "status": "failed",
+            "details": {"run_error": run_error},
+            "topics": [],
+            "calculated": [],
+            "skipped": {},
+            "warnings": [],
+            "errors": {},
+            "writes": {"confirmed": [], "failed": []},
+            "monitoring_error": None,
+        },
+    )
+
+    assert adapter.main() == 1
+    assert run_error in capsys.readouterr().err

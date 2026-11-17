@@ -54,6 +54,8 @@ BEGIN
 END;
 $test$;
 
+SET LOCAL ROLE service_role;
+
 INSERT INTO public.pipeline_runs (
     run_id, stage, mode, status, started_at
 )
@@ -65,27 +67,35 @@ VALUES (
     now()
 );
 
-SET LOCAL ROLE service_role;
-
-UPDATE public.pipeline_runs
-SET status = 'success', finished_at = now()
-WHERE pipeline_runs.run_id =
-    '00000000-0000-0000-0000-000000000001'::uuid;
-
-DO $backend_update$
+DO $select$
 BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM public.pipeline_runs
-        WHERE pipeline_runs.run_id =
-            '00000000-0000-0000-0000-000000000001'::uuid
+        WHERE run_id = '00000000-0000-0000-0000-000000000001'::uuid
+    ) THEN
+        RAISE EXCEPTION 'FAIL: service_role could not select pipeline run';
+    END IF;
+END;
+$select$;
+
+UPDATE public.pipeline_runs
+SET status = 'success', finished_at = now()
+WHERE run_id = '00000000-0000-0000-0000-000000000001'::uuid;
+
+DO $update$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.pipeline_runs
+        WHERE run_id = '00000000-0000-0000-0000-000000000001'::uuid
           AND status = 'success'
           AND finished_at IS NOT NULL
     ) THEN
         RAISE EXCEPTION 'FAIL: service_role could not update pipeline run';
     END IF;
 END;
-$backend_update$;
+$update$;
 
 DO $delete$
 DECLARE
@@ -93,8 +103,7 @@ DECLARE
 BEGIN
     BEGIN
         DELETE FROM public.pipeline_runs
-        WHERE pipeline_runs.run_id =
-            '00000000-0000-0000-0000-000000000001'::uuid;
+        WHERE run_id = '00000000-0000-0000-0000-000000000001'::uuid;
     EXCEPTION
         WHEN insufficient_privilege THEN
             blocked := true;
@@ -118,8 +127,8 @@ BEGIN
         )
         VALUES (
             '00000000-0000-0000-0000-000000000002',
-            'grouping',
-            'read_only',
+            'ranking',
+            'invalid_mode',
             'running',
             now()
         );
@@ -128,7 +137,7 @@ BEGIN
             blocked := true;
     END;
     IF NOT blocked THEN
-        RAISE EXCEPTION 'FAIL: invalid stage was accepted';
+        RAISE EXCEPTION 'FAIL: invalid mode was accepted';
     END IF;
 
     blocked := false;
@@ -140,7 +149,7 @@ BEGIN
             '00000000-0000-0000-0000-000000000003',
             'ranking',
             'read_only',
-            'success',
+            'invalid_status',
             now()
         );
     EXCEPTION
@@ -148,7 +157,91 @@ BEGIN
             blocked := true;
     END;
     IF NOT blocked THEN
-        RAISE EXCEPTION 'FAIL: unfinished success was accepted';
+        RAISE EXCEPTION 'FAIL: invalid status was accepted';
+    END IF;
+
+    blocked := false;
+    BEGIN
+        INSERT INTO public.pipeline_runs (
+            run_id, stage, mode, status, started_at, finished_at
+        )
+        VALUES (
+            '00000000-0000-0000-0000-000000000004',
+            'ranking',
+            'read_only',
+            'running',
+            now(),
+            now()
+        );
+    EXCEPTION
+        WHEN check_violation THEN
+            blocked := true;
+    END;
+    IF NOT blocked THEN
+        RAISE EXCEPTION 'FAIL: running row with finished_at was accepted';
+    END IF;
+
+    blocked := false;
+    BEGIN
+        INSERT INTO public.pipeline_runs (
+            run_id, stage, mode, status, started_at, finished_at
+        )
+        VALUES (
+            '00000000-0000-0000-0000-000000000005',
+            'ranking',
+            'read_only',
+            'success',
+            now(),
+            now() - interval '1 minute'
+        );
+    EXCEPTION
+        WHEN check_violation THEN
+            blocked := true;
+    END;
+    IF NOT blocked THEN
+        RAISE EXCEPTION 'FAIL: finished_at before started_at was accepted';
+    END IF;
+
+    blocked := false;
+    BEGIN
+        INSERT INTO public.pipeline_runs (
+            run_id, stage, mode, status, started_at, metrics
+        )
+        VALUES (
+            '00000000-0000-0000-0000-000000000006',
+            'ranking',
+            'read_only',
+            'running',
+            now(),
+            '[]'::jsonb
+        );
+    EXCEPTION
+        WHEN check_violation THEN
+            blocked := true;
+    END;
+    IF NOT blocked THEN
+        RAISE EXCEPTION 'FAIL: non-object metrics were accepted';
+    END IF;
+
+    blocked := false;
+    BEGIN
+        INSERT INTO public.pipeline_runs (
+            run_id, stage, mode, status, started_at, details
+        )
+        VALUES (
+            '00000000-0000-0000-0000-000000000007',
+            'ranking',
+            'read_only',
+            'running',
+            now(),
+            '[]'::jsonb
+        );
+    EXCEPTION
+        WHEN check_violation THEN
+            blocked := true;
+    END;
+    IF NOT blocked THEN
+        RAISE EXCEPTION 'FAIL: non-object details were accepted';
     END IF;
 END;
 $constraints$;

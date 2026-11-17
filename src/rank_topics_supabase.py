@@ -267,6 +267,7 @@ def calculate_run_status(
     writes_confirmed,
     writes_failed,
     run_error,
+    warnings=(),
 ):
     if run_error is not None:
         return "failed"
@@ -500,7 +501,15 @@ def main():
         print(f"Skipped topic {topic_id}: {reason}")
     for topic_id, error in result["errors"].items():
         print(f"Topic {topic_id}: {error}")
-    return 1 if result["errors"] or result["monitoring_error"] else 0
+    if result["details"]["run_error"]:
+        print(f"Ranking run error: {result['details']['run_error']}", file=sys.stderr)
+    return (
+        1
+        if result["errors"]
+        or result["monitoring_error"]
+        or result["details"]["run_error"]
+        else 0
+    )
 
 
 if __name__ == "__main__":

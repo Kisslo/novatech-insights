@@ -62,6 +62,7 @@ BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_roles WHERE rolname = 'service_role'
     ) THEN
+        REVOKE ALL ON TABLE public.pipeline_runs FROM service_role;
         GRANT USAGE ON SCHEMA public TO service_role;
         GRANT SELECT, INSERT, UPDATE
         ON TABLE public.pipeline_runs TO service_role;

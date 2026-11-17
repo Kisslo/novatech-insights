@@ -146,6 +146,26 @@ BEGIN
             run_id, stage, mode, status, started_at
         )
         VALUES (
+            '00000000-0000-0000-0000-000000000008',
+            'invalid_stage',
+            'read_only',
+            'running',
+            now()
+        );
+    EXCEPTION
+        WHEN check_violation THEN
+            blocked := true;
+    END;
+    IF NOT blocked THEN
+        RAISE EXCEPTION 'FAIL: invalid stage was accepted';
+    END IF;
+
+    blocked := false;
+    BEGIN
+        INSERT INTO public.pipeline_runs (
+            run_id, stage, mode, status, started_at
+        )
+        VALUES (
             '00000000-0000-0000-0000-000000000003',
             'ranking',
             'read_only',
@@ -158,6 +178,26 @@ BEGIN
     END;
     IF NOT blocked THEN
         RAISE EXCEPTION 'FAIL: invalid status was accepted';
+    END IF;
+
+    blocked := false;
+    BEGIN
+        INSERT INTO public.pipeline_runs (
+            run_id, stage, mode, status, started_at
+        )
+        VALUES (
+            '00000000-0000-0000-0000-000000000009',
+            'ranking',
+            'read_only',
+            'success',
+            now()
+        );
+    EXCEPTION
+        WHEN check_violation THEN
+            blocked := true;
+    END;
+    IF NOT blocked THEN
+        RAISE EXCEPTION 'FAIL: finished success without finished_at was accepted';
     END IF;
 
     blocked := false;

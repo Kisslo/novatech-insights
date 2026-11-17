@@ -193,4 +193,98 @@ BEGIN
 END;
 $permissions_test$;
 
+-- Prepare a post for the real backend-role test.
+CREATE TEMP TABLE draft_backend_test_context (
+    post_id bigint NOT NULL
+) ON COMMIT DROP;
+
+DO $fixture$
+DECLARE
+    new_topic_id bigint;
+    new_post_id bigint;
+BEGIN
+    INSERT INTO public.topics DEFAULT VALUES
+    RETURNING id INTO new_topic_id;
+
+    INSERT INTO public.posts (
+        topic_id, status, kisslo_angle, telegram_chat_id
+    )
+    VALUES (
+        new_topic_id,
+        'angle_received',
+        'Backend role test angle',
+        -100123456790
+    )
+    RETURNING id INTO new_post_id;
+
+    INSERT INTO pg_temp.draft_backend_test_context (post_id)
+    VALUES (new_post_id);
+END;
+$fixture$;
+
+GRANT SELECT ON pg_temp.draft_backend_test_context
+TO service_role;
+
+SET LOCAL ROLE service_role;
+
+DO $backend_test$
+DECLARE
+    test_post_id bigint;
+    saved_id bigint;
+    saved_version integer;
+BEGIN
+    IF current_user <> 'service_role' THEN
+        RAISE EXCEPTION 'FAIL: test is not running as service_role';
+    END IF;
+
+    SELECT post_id INTO STRICT test_post_id
+    FROM pg_temp.draft_backend_test_context;
+
+    SELECT result.draft_id, result.version
+    INTO STRICT saved_id, saved_version
+    FROM public.save_post_draft(
+        test_post_id,
+        'Backend test article',
+        'Backend test LinkedIn',
+        'Private reviewer notes',
+        ARRAY[]::bigint[],
+        'agree'
+    ) AS result;
+
+    IF saved_id IS NULL OR saved_version IS DISTINCT FROM 1 THEN
+        RAISE EXCEPTION 'FAIL: backend draft result';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.post_drafts
+        WHERE id = saved_id
+          AND post_id = test_post_id
+          AND version = saved_version
+          AND article_text = 'Backend test article'
+          AND linkedin_text = 'Backend test LinkedIn'
+          AND reviewer_notes = 'Private reviewer notes'
+          AND source_news_ids = ARRAY[]::bigint[]
+          AND stance = 'agree'
+    ) THEN
+        RAISE EXCEPTION 'FAIL: backend cannot verify saved draft';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.posts
+        WHERE id = test_post_id
+          AND status = 'draft_generated'
+          AND kisslo_angle = 'Backend role test angle'
+    ) THEN
+        RAISE EXCEPTION 'FAIL: backend cannot verify post status';
+    END IF;
+
+    RAISE NOTICE
+        'PASS: service_role saved a draft and verified content and status';
+END;
+$backend_test$;
+
+RESET ROLE;
+
 ROLLBACK;

@@ -265,3 +265,20 @@ jobs:
               -v ON_ERROR_STOP=1 \
               -f /tmp/test_authority_classification.sql
           done
+
+      - name: Test pipeline run history
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          for test_database in novatech_test novatech_permissions_test
+          do
+            echo "Applying pipeline run history to $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/011_create_pipeline_runs.sql
+
+            echo "Testing pipeline run history in $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/test_pipeline_runs.sql
+          done

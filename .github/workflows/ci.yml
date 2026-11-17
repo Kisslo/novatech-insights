@@ -265,3 +265,20 @@ jobs:
               -v ON_ERROR_STOP=1 \
               -f /tmp/test_authority_classification.sql
           done
+
+      - name: Test versioned post drafts
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          for test_database in novatech_test novatech_permissions_test
+          do
+            echo "Applying draft storage to $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/010_create_post_drafts.sql
+
+            echo "Testing draft storage in $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/test_post_drafts.sql
+          done

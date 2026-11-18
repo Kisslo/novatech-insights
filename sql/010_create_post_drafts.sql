@@ -70,7 +70,39 @@ CREATE TABLE public.post_drafts (
 ALTER TABLE public.post_drafts ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE public.post_drafts FROM PUBLIC;
-REVOKE ALL ON SEQUENCE public.post_drafts_id_seq FROM PUBLIC;
+
+-- Resolve the new table's actual identity sequence.
+-- A legacy table may still own public.post_drafts_id_seq.
+DO $sequence_permissions$
+DECLARE
+    sequence_name regclass;
+    role_name text;
+BEGIN
+    sequence_name :=
+        pg_get_serial_sequence('public.post_drafts', 'id')::regclass;
+
+    IF sequence_name IS NULL THEN
+        RAISE EXCEPTION 'Draft identity sequence was not found';
+    END IF;
+
+    EXECUTE format(
+        'REVOKE ALL ON SEQUENCE %s FROM PUBLIC',
+        sequence_name
+    );
+
+    FOR role_name IN
+        SELECT rolname
+        FROM pg_roles
+        WHERE rolname IN ('anon', 'authenticated', 'service_role')
+    LOOP
+        EXECUTE format(
+            'REVOKE ALL ON SEQUENCE %s FROM %I',
+            sequence_name,
+            role_name
+        );
+    END LOOP;
+END;
+$sequence_permissions$;
 
 CREATE FUNCTION public.save_post_draft(
     p_post_id bigint,
@@ -162,11 +194,6 @@ BEGIN
     LOOP
         EXECUTE format(
             'REVOKE ALL ON TABLE public.post_drafts FROM %I',
-            role_name
-        );
-
-        EXECUTE format(
-            'REVOKE ALL ON SEQUENCE public.post_drafts_id_seq FROM %I',
             role_name
         );
 

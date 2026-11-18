@@ -1,6 +1,7 @@
 -- Versioned article and LinkedIn drafts.
 -- Apply after migrations 001–009.
 -- Test locally before shared deployment.
+-- Resolve the existing shared post_drafts table before applying.
 
 BEGIN;
 
@@ -100,9 +101,10 @@ BEGIN
         RAISE EXCEPTION 'Post % does not exist', p_post_id;
     END IF;
 
+    -- A new draft requires an angle or an explicit change request.
+    -- After a successful save, draft_generated blocks another save.
     IF current_status NOT IN (
         'angle_received',
-        'draft_generated',
         'changes_requested'
     ) THEN
         RAISE EXCEPTION
@@ -201,7 +203,9 @@ COMMENT ON FUNCTION public.save_post_draft(
 ) IS
 'Saves the next draft version and updates post status atomically.
 Locks the post to serialize version allocation.
-Each successful call creates a version; retries are not deduplicated.
+Accepts only angle_received or changes_requested.
+Repeated saves from draft_generated are rejected.
+This is a status guard, not request-ID-based idempotency.
 Does not approve or publish content.';
 
 COMMIT;

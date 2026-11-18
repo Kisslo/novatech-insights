@@ -70,7 +70,32 @@ BEGIN
         RAISE EXCEPTION 'FAIL: saved content differs';
     END IF;
 
-    -- Saving from draft_generated creates version 2.
+    -- A repeated save from draft_generated must fail.
+    blocked := false;
+    BEGIN
+        PERFORM public.save_post_draft(
+            test_post_id, 'Repeated article', 'Repeated LinkedIn', '',
+            ARRAY[]::bigint[], 'agree'
+        );
+    EXCEPTION WHEN raise_exception THEN
+    blocked := true;
+    END;
+
+    SELECT COUNT(*) INTO draft_count
+    FROM public.post_drafts WHERE post_id = test_post_id;
+
+    SELECT status INTO actual_status
+    FROM public.posts WHERE id = test_post_id;
+
+    IF NOT blocked OR draft_count <> 1
+       OR actual_status IS DISTINCT FROM 'draft_generated' THEN
+        RAISE EXCEPTION 'FAIL: repeated save was not safely rejected';
+    END IF;
+
+    -- A requested change permits the next version.
+    UPDATE public.posts SET status = 'changes_requested'
+    WHERE id = test_post_id;
+
     SELECT result.version INTO saved_version
     FROM public.save_post_draft(
         test_post_id, 'Article two', 'LinkedIn two', '',
@@ -78,7 +103,7 @@ BEGIN
     ) AS result;
 
     IF saved_version IS DISTINCT FROM 2 THEN
-        RAISE EXCEPTION 'FAIL: second version';
+        RAISE EXCEPTION 'FAIL: second version after requested changes';
     END IF;
 
     -- Invalid content must preserve both status and drafts.

@@ -2,6 +2,7 @@
 
 Status: Implemented locally for review in PR #60.
 Migration 010 has not been deployed to shared Supabase.
+The latest status-guard changes still need to be pushed and checked in CI.
 
 ## Goal
 
@@ -52,12 +53,42 @@ These operations are atomic: an error rolls back the function's writes.
 
 Allowed starting statuses:
 - angle_received
-- draft_generated
 - changes_requested
 
-Call through POST /rest/v1/rpc/save_post_draft using the backend role.
-Nedal's client must use this function instead of separate insert
-and status-update requests.
+Saving from draft_generated is rejected.
+A later version requires the post to enter changes_requested.
+
+The post lock serializes concurrent saves for the same post.
+After one save succeeds, a second waiting save sees draft_generated
+and is rejected.
+
+This is a status guard, not request-ID-based idempotency.
+A repeated call returns an error rather than the previous result.
+A delayed request arriving after a later changes_requested transition
+cannot be identified as an old request by this function.
+
+## API and n8n integration
+
+The backend calls:
+POST /rest/v1/rpc/save_post_draft
+
+Nedal's endpoint in PR #68 must use this function instead of separate
+draft-insert and status-update requests.
+
+The proposed n8n integration calls:
+POST /drafts/{post_id}
+
+n8n must stop inserting draft rows directly before the new shared
+workflow is enabled.
+
+## Stance
+
+The agreed initial direction is agree as the endpoint default.
+The database function requires an explicit agree or rebut value
+and stores it on each draft version.
+
+Collecting stance through Telegram is later work.
+The proposed interaction is a choice after Kisslo supplies his angle.
 
 ## Post statuses
 
@@ -77,6 +108,9 @@ All states after awaiting_angle require a nonblank Kisslo angle.
 Allowing these values does not implement approval or publishing.
 Topic selection status remains separate from post status.
 
+draft_kept and storage for Kisslo's requested changes are outside
+this migration and are planned as follow-up work.
+
 ## Permissions
 
 The function follows the existing SECURITY DEFINER pattern with
@@ -92,28 +126,67 @@ Separate storage does not itself prevent their publication.
 ## Validation
 
 Local migration execution passed.
-sql/test_post_drafts.sql passed checks for:
+The function was subsequently updated locally with the new status guard.
+The updated sql/test_post_drafts.sql passed checks for:
 - Draft version allocation and saved content.
-- Saving from angle_received, draft_generated and changes_requested.
+- Saving from angle_received and changes_requested.
 - Rejection before an angle and after approval.
+- Rejection of repeated saves from draft_generated without data changes.
 - Unchanged drafts and status after invalid content.
 - RLS and backend permissions.
+- Calling the function under SET LOCAL ROLE service_role and verifying
+  the saved draft and post status.
 
 CI applies migration 010 and runs the test in both test databases.
+The latest changes require a new CI run after they are pushed.
 
-## Decisions still needed
+## Existing shared Supabase table
 
-- Duplicate requests: locking prevents version collisions, but each
-  successful call creates a version. Retries are not deduplicated.
-- How approval identifies the exact draft version.
-- Whether article and LinkedIn content are approved together.
-- Editing approved content and requesting approval again.
-- Publication destination, retries and duplicate prevention.
-- Whether source-ID validation needs stronger database rules.
+A different post_drafts table already exists in shared Supabase.
+It uses article_draft, linkedin_draft, sources and editorial_note,
+and also contains status and updated_at.
+
+The inspected table contains two n8n test rows:
+- Draft ID 1: post_id 2, version 1.
+- Draft ID 2: post_id 2, version 1.
+
+Migration 010 cannot run while that table retains the post_drafts name.
+Its duplicate post/version pairs also conflict with the new unique rule.
+
+The proposed deployment approach is to preserve the old table under
+an agreed legacy name, then create the new table using migration 010.
+No existing rows have been changed or deleted.
+
+Before renaming, coordinate with Turker and Nedal and inspect dependent
+objects, indexes and sequences for conflicts with the new migration.
+Renaming a table alone does not rename all of its related objects.
+
+Legacy rows are not automatically copied into the new table.
+Any later data migration requires an agreed mapping and version policy.
+
+## Decisions and follow-up work
+
+- Confirm the legacy-table preservation and dependency-handling plan.
+- Complete n8n and endpoint integration.
+- Decide how approval identifies the exact draft version.
+- Decide whether article and LinkedIn content are approved together.
+- Define editing and reapproval of approved content.
+- Define publication destination, retries and duplicate prevention.
+- Decide whether source-ID validation needs stronger database rules.
+- Add draft_kept and change-request storage in a later migration.
 
 ## Deployment
 
-Review the migration and coordinate client compatibility first.
-After merge, agree deployment timing with the team.
+Review the latest changes and confirm passing CI before merge.
+Coordinate deployment timing with Turker and Nedal.
+
+Before deployment:
+1. Confirm the shared table's current structure and data.
+2. Agree how to preserve the old table and handle dependencies.
+3. Coordinate stopping direct n8n writes to the old draft workflow.
+4. Confirm Nedal's endpoint uses the RPC function.
+
+Then apply the agreed legacy-table changes and migration 010.
 Do not rerun migration 008 on an existing posts table.
-Deploy migration 010 separately, then verify backend RPC access.
+Verify the new table, constraints, permissions and backend RPC access.
+Coordinate a real integration run with Nedal after deployment.

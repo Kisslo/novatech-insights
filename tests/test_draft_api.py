@@ -117,7 +117,8 @@ def test_unknown_post_gives_404(claude):
 
 
 @pytest.mark.parametrize(
-    ("post_id", "status"), [(2, "awaiting_angle"), (4, "approved")]
+    ("post_id", "status"),
+    [(2, "awaiting_angle"), (4, "approved"), (6, "draft_generated")],
 )
 def test_post_in_wrong_status_gives_409(claude, tmp_path, post_id, status):
     response = post_draft(post_id)
@@ -244,7 +245,7 @@ def test_buttons_follow_the_new_version(claude):
 
 
 def test_a_new_call_creates_a_new_version(claude, tmp_path):
-    first = post_draft(3)  # post 3 already has status draft_generated
+    first = post_draft(3)  # post 3 has status changes_requested
     second = post_draft(3)
 
     assert (first.status_code, second.status_code) == (200, 200)
@@ -339,6 +340,33 @@ def test_save_failure_gives_502_without_details(claude, monkeypatch):
     assert response.status_code == 502
     assert response.json() == {"detail": "Could not save the draft"}
     assert SUPABASE_KEY not in response.text
+    assert draft_api._in_progress == set()
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [
+        (
+            draft_store.PostNotReady(
+                "Post 1 cannot receive a draft in status approved"
+            ),
+            409,
+        ),
+        (draft_store.PostNotFound("Post 1 does not exist"), 404),
+    ],
+)
+def test_status_changed_while_writing_gives_409_or_404(
+    claude, monkeypatch, tmp_path, error, status
+):
+    def refusing_save(source, post, row):
+        raise error
+
+    monkeypatch.setattr(draft_api, "save_version", refusing_save)
+
+    response = post_draft(1)
+
+    assert response.status_code == status
+    assert saved_files(tmp_path) == []
     assert draft_api._in_progress == set()
 
 

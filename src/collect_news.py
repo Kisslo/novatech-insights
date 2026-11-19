@@ -6,6 +6,7 @@ from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from http.client import HTTPException
 from pathlib import Path
+from time import perf_counter
 from urllib.error import URLError
 
 FOLDER = Path(__file__).resolve().parent.parent / "data"
@@ -98,6 +99,7 @@ def clean_description(value):
 
 
 def main():
+    started_at = perf_counter()
     now = datetime.now(UTC)
     cutoff = now - timedelta(days=MAX_AGE_DAYS)
 
@@ -133,6 +135,11 @@ def main():
     with SOURCES_FILE.open("r", encoding="utf-8-sig", newline="") as file:
         sources = list(csv.DictReader(file))
 
+    feeds_read = 0
+    feeds_failed = 0
+    feeds_unsupported = 0
+    feeds_without_url = 0
+    total_fetched = 0
     total_new = 0
 
     for source in sources:
@@ -140,33 +147,40 @@ def main():
         feed_url = source["feed_url"].strip()
 
         if not feed_url:
+            feeds_without_url += 1
+            print(f"Skipped feed {name}: missing URL.")
             continue
 
         print(f"\nReading: {name}")
 
-        request = urllib.request.Request(
-            feed_url,
-            headers={"User-Agent": "NovatechStudentRSS/1.0"},
-        )
-
         try:
+            request = urllib.request.Request(
+                feed_url,
+                headers={"User-Agent": "NovatechStudentRSS/1.0"},
+            )
             with urllib.request.urlopen(request, timeout=30) as response:
                 root = ET.fromstring(response.read())
-        except (URLError, OSError, HTTPException, ET.ParseError) as error:
-            print(f"Could not read {name}: {error}")
+        except (ValueError, URLError, OSError, HTTPException, ET.ParseError) as error:
+            feeds_failed += 1
+            print(f"Feed failed: {name} ({type(error).__name__}: {error})")
             continue
 
         channel = root.find("channel")
 
         if channel is None:
-            print("Skipped: this feed is not in the supported RSS format.")
+            feeds_unsupported += 1
+            print(f"Unsupported feed format: {name}")
             continue
+
+        feeds_read += 1
+        items = channel.findall("item")
+        total_fetched += len(items)
 
         new_count = 0
         skipped_dates = 0
         descriptions_added = 0
 
-        for item in channel.findall("item"):
+        for item in items:
             title = item.findtext("title", default="").strip()
             link = item.findtext("link", default="").strip()
             published = item.findtext("pubDate", default="").strip()
@@ -200,6 +214,11 @@ def main():
             new_count += 1
 
         total_new += new_count
+        if new_count:
+            print(f"Feed read successfully: {name}")
+        else:
+            print(f"Feed read successfully: {name} (no new articles added)")
+        print(f"Fetched RSS items: {len(items)}")
         print(f"New articles: {new_count}")
         print(f"Existing articles given descriptions: {descriptions_added}")
         print(f"Skipped because of date: {skipped_dates}")
@@ -220,10 +239,17 @@ def main():
 
     temporary_file.replace(OUTPUT_FILE)
 
-    print(f"\nPreviously saved rows excluded: {removed_existing}")
+    print("\nCollection summary")
+    print(f"Feeds read successfully: {feeds_read}")
+    print(f"Feeds failed: {feeds_failed}")
+    print(f"Feeds with unsupported format: {feeds_unsupported}")
+    print(f"Feeds skipped because of missing URL: {feeds_without_url}")
+    print(f"Total fetched RSS items: {total_fetched}")
+    print(f"Previously saved rows excluded: {removed_existing}")
     print(f"Total new articles: {total_new}")
     print(f"Total saved articles: {len(articles)}")
     print(f"Saved to: {OUTPUT_FILE}")
+    print(f"Run time: {perf_counter() - started_at:.2f} seconds")
 
 
 if __name__ == "__main__":

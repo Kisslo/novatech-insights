@@ -715,3 +715,21 @@ Requests need the header `X-API-Key` with `TELEGRAM_API_KEY` from `.env`.
 `TELEGRAM_SOURCE` chooses `fixture` (default) or `supabase`.
 See [docs/telegram-api.md](docs/telegram-api.md) for the response format,
 errors, the tunnel used during development and the n8n settings.
+
+
+## Article Drafts
+
+`POST /drafts/{post_id}` in the same API writes a Swedish article draft and
+a LinkedIn post for a post where Kisslo has given his angle (issue #30).
+It makes two Claude calls: one writes, one removes AI-sounding phrasing.
+Both get Kisslo's style guide. The draft is saved as a new version and the
+post gets status `draft_generated`. The code is in `src/draft_api.py`,
+`src/draft_article.py` and `src/draft_store.py`.
+
+```powershell
+curl.exe -X POST -H "X-API-Key: <key>" "http://127.0.0.1:8000/drafts/1?dry_run=true"
+```
+
+A real call takes 30–60 seconds and costs about 0.05 USD; `?dry_run=true`
+costs nothing. With `TELEGRAM_SOURCE=supabase` it needs migration 010
+(`post_drafts` and `save_post_draft`). See [docs/draft-api.md](docs/draft-api.md).

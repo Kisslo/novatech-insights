@@ -39,9 +39,11 @@ Content-Type: application/json
 | body `stance` | no | `agree` (default) or `rebut`. Where Kisslo's stance is stored is not decided yet, so n8n can send it here. Other fields are refused (422) |
 | `?dry_run=true` | no | Check the post and return the prompt and an estimated cost. No call to Claude, nothing is saved |
 
-A draft can be written when the post has status `angle_received`,
-`draft_generated` or `changes_requested`. Each call writes a new version;
-earlier versions are kept.
+A draft can be written when the post has status `angle_received` (first
+draft) or `changes_requested` (Kisslo asked for changes). Each call writes a
+new version; earlier versions are kept. A post with status
+`draft_generated` already has a draft waiting for Kisslo, so a new call
+gives 409 instead of a duplicate version.
 
 What the endpoint reads:
 
@@ -72,14 +74,19 @@ What the endpoint reads:
    AI-sounding phrasing, repetition and sentences about the sources or the
    writing. It must not add facts, figures, links or length.
 4. **Guard.** The code compares the text before and after the review. If the
-   review added or removed a link, changed the source list, a heading, a sentence with an `[UNVERIFIED]` tag or the `[LÄNK]` placeholder, added, changed or moved a figure (removing one with its sentence is allowed), or made the text more than 5 % longer, the text from call 1 is kept for that
-   part and a warning is added. The article and the LinkedIn post are checked separately.
+   review added or removed a link, changed the source list, a heading, a
+   sentence with an `[UNVERIFIED]` tag or the `[LÄNK]` placeholder, added,
+   changed or moved a figure (removing one with its sentence is allowed), or
+   made the text more than 5 % longer, the text from call 1 is kept for that
+   part and a warning is added. The article and the LinkedIn post are
+   checked separately.
 5. **Checks.** Length (500–800 words), 3–4 sections, a headline, 3–5
    LinkedIn sentences, the `[LÄNK]` placeholder, links only to the given
    sources, no reviewer notes and no "Kisslo" in the texts. Problems become
    warnings; they do not stop the draft.
-6. **Save.** One new row in `post_drafts`, then `posts.status =
-   draft_generated` (only if the status still allows it).
+6. **Save.** One call to the database function `save_post_draft`, which
+   inserts the next version in `post_drafts` and sets `posts.status =
+   draft_generated` in one transaction (see Storage).
 
 The reviewer notes (Claude's notes, what the review changed, the warnings,
 the model and the cost) are stored in their own column and are never part
@@ -156,10 +163,10 @@ On every error no draft is saved by this call and the post keeps its status.
 | 503 | `TELEGRAM_API_KEY` missing or too short on the server | `{"detail": "API key is not configured"}` |
 | 500 | `TELEGRAM_SOURCE` is not `fixture` or `supabase` | `{"detail": "Server is not configured"}` |
 
-One case is reported but cannot be rolled back: if the draft row is saved but
-the status cannot be changed (because it changed in the meantime), the
-response is 502 and the server log says which version was saved. A new call
-creates the next version.
+If the post's status changes while the draft is being written (for example
+Kisslo presses something else in Telegram), the save is refused with 409 and
+nothing is saved: the draft row and the status change happen in one
+transaction.
 
 ## Buttons under the draft
 
@@ -173,8 +180,8 @@ returns the messages; n8n sends them and handles the presses.
 | Button | `callback_data` | What happens | Status |
 |---|---|---|---|
 | Publicera | `publish:<post_id>:<version>` | This version is published on the website | WordPress publishing, separate issue |
-| Ändra | `revise:<post_id>:<version>` | Kisslo writes what he wants changed, and a new version is made from this one and his text | Separate issue after #30 |
-| Skippa | `keep:<post_id>:<version>` | The draft is kept in `post_drafts` (it is already paid for); nothing more happens | Status value to agree on in #60 (proposal `draft_kept`) |
+| Ändra | `revise:<post_id>:<version>` | Kisslo writes what he wants changed, and a new version is made from this one and his text | #67 |
+| Skippa | `keep:<post_id>:<version>` | The draft is kept in `post_drafts` (it is already paid for); nothing more happens | Status value in a follow-up migration (proposal `draft_kept`) |
 
 The version is part of `callback_data`, so a press always applies to the
 exact version Kisslo read, also if a newer version exists. The prefixes
@@ -195,28 +202,31 @@ draft. `callback_data` is at most 64 bytes, as Telegram requires.
 | Source | Posts and topics | Drafts |
 |---|---|---|
 | `fixture` | `tests/fixtures/sample_posts.json` and `sample_topics.json` | One JSON file per version in `output/drafts/post_<id>_v<n>.json` (ignored by Git). The fixture file is not changed |
-| `supabase` | `posts`, `topic_overview`, `topic_top_articles` | One row per version in `post_drafts`, then `posts.status` is updated |
+| `supabase` | `posts`, `topic_overview`, `topic_top_articles` | One row per version in `post_drafts` and `posts.status = draft_generated`, saved together by `save_post_draft` |
 
 `TELEGRAM_SOURCE` chooses the source for both endpoints.
 
-The `post_drafts` table and the new status values come from the migration in
-PR #60 (Nosheen). Until it is run, a call with `TELEGRAM_SOURCE=supabase`
-stops with 502 "Drafts cannot be saved" before Claude is called. The code
-expects:
+The `post_drafts` table, the new status values and the function
+`save_post_draft` come from `sql/010_create_post_drafts.sql` (PR #60,
+Nosheen; run in the team's Supabase on 18 Nov). In a database without it, a
+call with `TELEGRAM_SOURCE=supabase` stops with 502 "Drafts cannot be
+saved" before Claude is called.
 
-- `post_drafts` with `id`, `post_id` (→ `posts.id`), `version`,
-  `article_text`, `linkedin_text`, `reviewer_notes`, `source_news_ids`
-  (`bigint[]`), `stance` (`agree` / `rebut`) and `created_at`, and a unique
-  (`post_id`, `version`)
-- `draft_generated` (and later statuses) allowed in `posts.status`
-- the backend key may SELECT and INSERT on `post_drafts` and UPDATE
-  `posts.status`
+The endpoint saves with one call to
+`POST /rest/v1/rpc/save_post_draft` with `p_post_id`, `p_article_text`,
+`p_linkedin_text`, `p_reviewer_notes`, `p_source_news_ids` and `p_stance`.
+In one transaction the function locks the post, checks that the status is
+`angle_received` or `changes_requested`, gives the draft
+the next version number, inserts it and sets the status to
+`draft_generated`. It returns `draft_id` and `version`. The backend key may
+only read `post_drafts` and execute the function; it cannot insert or
+update rows directly.
 
-Saving is two requests today: insert the draft row, then update the status
-with the condition that it still allows a draft. A database function that
-does both in one transaction has been requested in PR #60.
-
-Table names can be changed in `.env` with `POSTS_TABLE` and `DRAFTS_TABLE`.
+| The function says | The endpoint answers |
+|---|---|
+| `Post <id> does not exist` | 404 |
+| `Post <id> cannot receive a draft in status <status>` | 409 |
+| Any other error | 502, nothing saved |
 
 ## Run locally
 
@@ -239,7 +249,8 @@ Table names can be changed in `.env` with `POSTS_TABLE` and `DRAFTS_TABLE`.
 
    The first gives 401, the second the prompt and estimate, the third a real
    draft (costs money). With the fixture source, post 1 is ready for a draft,
-   post 2 and 4 give 409 and post 3 shows a new version.
+   post 2, 4 and 6 give 409 and post 3 (changes requested) makes a new
+   version for every call.
 
 The same prompt can be tried without the API:
 
@@ -261,7 +272,7 @@ uv run python src/draft_article.py --topic-id 101 --angle "Småföretag ska inte
 
 ## Out of scope
 
-Handling the button presses (n8n), publishing to WordPress, revising a draft from Kisslo's change request,
-searching for more supporting articles or research, pasted links or text,
-counterpoints in the top 5 (#55) and the source check with a separate model
-(#33).
+Handling the button presses (n8n), publishing to WordPress, revising a draft
+from Kisslo's change request (#67), searching for more supporting articles or
+research, pasted links or text, counterpoints in the top 5 (#55) and the
+source check with a separate model (#33).

@@ -731,5 +731,5 @@ curl.exe -X POST -H "X-API-Key: <key>" "http://127.0.0.1:8000/drafts/1?dry_run=t
 ```
 
 A real call takes 30–60 seconds and costs about 0.05 USD; `?dry_run=true`
-costs nothing. With `TELEGRAM_SOURCE=supabase` it needs the `post_drafts`
-table from PR #60. See [docs/draft-api.md](docs/draft-api.md).
+costs nothing. With `TELEGRAM_SOURCE=supabase` it needs migration 010
+(`post_drafts` and `save_post_draft`). See [docs/draft-api.md](docs/draft-api.md).

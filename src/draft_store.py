@@ -13,20 +13,19 @@ Two sources, the same as TELEGRAM_SOURCE:
               tests/fixtures/sample_topics.json. A saved version becomes a
               JSON file in output/drafts/. The fixture file is never
               changed, so the post keeps its status.
-    supabase  the posts table, the topic views and the post_drafts table
-              through the REST API.
+    supabase  the posts table and the topic views through the REST API.
+              A draft is saved with the database function save_post_draft
+              (sql/010_create_post_drafts.sql, PR #60).
 
-Saving in Supabase takes two requests: insert the draft row, then set the
-post's status to draft_generated (only if the status still allows it). If
-the second request fails, the draft row exists but the status is unchanged.
-A database function that does both in one transaction is requested in
-PR #60; when it exists, save_version() can call it instead.
+save_post_draft does everything in one transaction: it locks the post,
+checks that its status allows a draft, gives the draft the next version
+number, inserts it in post_drafts and sets the status to draft_generated.
+Either all of it happens or none of it. The backend key may only read
+post_drafts and call the function; it cannot insert or update rows itself.
 
 Settings in .env (only for supabase):
     SUPABASE_URL, SUPABASE_KEY
     TOPICS_OVERVIEW_VIEW, TOPICS_ARTICLES_VIEW   (same as label_topics.py)
-    POSTS_TABLE   (default posts)
-    DRAFTS_TABLE  (default post_drafts)
 """
 
 import json
@@ -35,7 +34,6 @@ import re
 from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from content_tools import format_cost
@@ -55,13 +53,16 @@ from label_topics import (
 PROJECT_FOLDER = Path(__file__).resolve().parent.parent
 POSTS_FIXTURE = PROJECT_FOLDER / "tests" / "fixtures" / "sample_posts.json"
 FIXTURE_OUTPUT_DIR = PROJECT_FOLDER / "output" / "drafts"
-DEFAULT_POSTS_TABLE = "posts"
-DEFAULT_DRAFTS_TABLE = "post_drafts"
+POSTS_TABLE = "posts"
+DRAFTS_TABLE = "post_drafts"
+SAVE_FUNCTION = "save_post_draft"
 SOURCES = ("fixture", "supabase")
 
-# A draft may be generated for a new angle, and again after an earlier draft
-# or after Kisslo asked for changes. Each generation is a new version.
-GENERATE_FROM = ("angle_received", "draft_generated", "changes_requested")
+# A draft may be generated for a new angle, or again after Kisslo asked for
+# changes (each generation is a new version). Not from draft_generated: a
+# repeated call for a draft that is already waiting for Kisslo would only
+# make a duplicate version. save_post_draft in sql/010 has the same rule.
+GENERATE_FROM = ("angle_received", "changes_requested")
 DRAFT_STATUS = "draft_generated"
 
 POST_FIELDS = "id,topic_id,status,kisslo_angle"
@@ -113,49 +114,57 @@ def read_rows(table: str, params: dict) -> list[dict]:
         raise StoreError(str(error)) from None
 
 
-def write_rows(method: str, table: str, params: dict, values: dict) -> list[dict]:
-    """POST (insert) or PATCH (update) in Supabase. Returns the changed rows.
+def error_message(error: HTTPError) -> str:
+    """The "message" field of a Supabase error answer, or "" if there is none."""
+    try:
+        body = json.loads(error.read().decode("utf-8"))
+    except OSError, ValueError:
+        return ""
+    message = body.get("message") if isinstance(body, dict) else None
+    return message if isinstance(message, str) else ""
 
-    Supabase is asked to return the rows, so that "0 rows updated" can be
-    seen by the caller instead of passing silently.
+
+def call_function(name: str, arguments: dict) -> list[dict]:
+    """Call a database function through /rest/v1/rpc/<name>. Returns its rows.
+
+    The database answers HTTP 400 with the text of RAISE EXCEPTION when the
+    function refuses. Those texts are turned into PostNotFound and
+    PostNotReady, so the endpoint can answer 404 and 409.
     """
     base_url, key = supabase_settings()
-    query = urlencode(params, safe="(),.")
     request = Request(
-        f"{base_url.rstrip('/')}/rest/v1/{table}?{query}",
-        data=json.dumps(values).encode("utf-8"),
-        method=method,
-        headers={
-            "apikey": key,
-            "Content-Type": "application/json",
-            "Prefer": "return=representation",
-        },
+        f"{base_url.rstrip('/')}/rest/v1/rpc/{name}",
+        data=json.dumps(arguments).encode("utf-8"),
+        method="POST",
+        headers={"apikey": key, "Content-Type": "application/json"},
     )
     try:
         with urlopen(request, timeout=SUPABASE_TIMEOUT_SECONDS) as response:
             rows = json.loads(response.read().decode("utf-8"))
     except HTTPError as error:
+        message = error_message(error)
+        if "does not exist" in message and message.startswith("Post "):
+            raise PostNotFound(message) from error
+        if "cannot receive a draft" in message:
+            raise PostNotReady(message) from error
         if error.code in (401, 403):
             raise StoreError(
-                f"Supabase refused to write to '{table}' (HTTP {error.code}). "
-                "Check SUPABASE_KEY and the grants on the table."
+                f"Supabase refused to run '{name}' (HTTP {error.code}). "
+                "Check SUPABASE_KEY and that the backend role may execute it."
             ) from error
         if error.code == 404:
-            raise StoreError(f"Table '{table}' was not found in Supabase.") from error
-        if error.code == 409:
             raise StoreError(
-                f"Supabase refused the row in '{table}' (HTTP 409, conflict). "
-                "Another draft was probably saved at the same time."
+                f"Function '{name}' was not found in Supabase. Is migration 010 run?"
             ) from error
         raise StoreError(
-            f"Supabase answered HTTP {error.code} when writing to '{table}'."
+            f"Supabase answered HTTP {error.code} for '{name}': {message[:200]}"
         ) from error
     except (URLError, OSError) as error:
         raise StoreError(f"Could not reach Supabase ({error}).") from error
     except json.JSONDecodeError as error:
         raise StoreError("Supabase did not answer with JSON.") from error
     if not isinstance(rows, list):
-        raise StoreError(f"Unexpected answer from Supabase for '{table}'.")
+        raise StoreError(f"Unexpected answer from Supabase for '{name}'.")
     return rows
 
 
@@ -175,7 +184,7 @@ def load_post(source: str, post_id: int) -> dict:
     check_source(source)
     if source == "supabase":
         posts = read_rows(
-            table_name("POSTS_TABLE", DEFAULT_POSTS_TABLE),
+            POSTS_TABLE,
             {"select": POST_FIELDS, "id": f"eq.{post_id}"},
         )
     else:
@@ -263,16 +272,13 @@ def build_row(post: dict, draft: dict, stance: str, model: str) -> dict:
 def check_can_save(source: str) -> None:
     """Raise StoreError if a draft could not be saved (asked before Claude is called).
 
-    For supabase: one small read from the drafts table, which fails if the
-    table is missing or the key has no access. That way a missing migration
-    is found before any money is spent. Fixture: nothing to check.
+    For supabase: one small read from post_drafts, which fails if migration
+    010 is missing or the key has no access. That way it is found before any
+    money is spent. Fixture: nothing to check.
     """
     check_source(source)
     if source == "supabase":
-        read_rows(
-            table_name("DRAFTS_TABLE", DEFAULT_DRAFTS_TABLE),
-            {"select": "version", "limit": "1"},
-        )
+        read_rows(DRAFTS_TABLE, {"select": "version", "limit": "1"})
 
 
 def next_fixture_version(post_id: int) -> int:
@@ -290,8 +296,10 @@ def save_version(source: str, post: dict, row: dict) -> dict:
     """Save the draft as the post's next version and set status draft_generated.
 
     Returns {"draft_id", "version", "status"}. draft_id is None for fixture.
-    Raises StoreError if the draft could not be saved, or if it was saved
-    but the status could not be changed (the message says which).
+    With supabase, save_post_draft does it in one transaction, so on any
+    error nothing is saved and the status is unchanged. Raises PostNotFound
+    or PostNotReady if the post is gone or its status changed meanwhile,
+    and StoreError for other failures.
     """
     check_source(source)
     post_id = post["id"]
@@ -310,38 +318,21 @@ def save_version(source: str, post: dict, row: dict) -> dict:
         )
         return {"draft_id": None, "version": version, "status": DRAFT_STATUS}
 
-    drafts = table_name("DRAFTS_TABLE", DEFAULT_DRAFTS_TABLE)
-    posts = table_name("POSTS_TABLE", DEFAULT_POSTS_TABLE)
-    latest = read_rows(
-        drafts,
+    rows = call_function(
+        SAVE_FUNCTION,
         {
-            "select": "version",
-            "post_id": f"eq.{post_id}",
-            "order": "version.desc",
-            "limit": "1",
+            "p_post_id": post_id,
+            "p_article_text": row["article_text"],
+            "p_linkedin_text": row["linkedin_text"],
+            "p_reviewer_notes": row["reviewer_notes"],
+            "p_source_news_ids": row["source_news_ids"],
+            "p_stance": row["stance"],
         },
     )
-    version = latest[0]["version"] + 1 if latest else 1
-    inserted = write_rows(
-        "POST", drafts, {"select": "id,version"}, {**row, "version": version}
-    )
-    if len(inserted) != 1:
-        raise StoreError(f"The draft for post {post_id} was not saved.")
-    # Only change the status if it is still one we may generate from, so a
-    # status that changed during the generation is not overwritten.
-    updated = write_rows(
-        "PATCH",
-        posts,
-        {
-            "id": f"eq.{post_id}",
-            "status": f"in.({','.join(GENERATE_FROM)})",
-            "select": "id",
-        },
-        {"status": DRAFT_STATUS},
-    )
-    if len(updated) != 1:
-        raise StoreError(
-            f"Draft version {version} for post {post_id} was saved, but the "
-            f"status could not be set to {DRAFT_STATUS} (it changed meanwhile)."
-        )
-    return {"draft_id": inserted[0]["id"], "version": version, "status": DRAFT_STATUS}
+    if len(rows) != 1 or "draft_id" not in rows[0] or "version" not in rows[0]:
+        raise StoreError(f"Unexpected answer from {SAVE_FUNCTION} for post {post_id}.")
+    return {
+        "draft_id": rows[0]["draft_id"],
+        "version": rows[0]["version"],
+        "status": DRAFT_STATUS,
+    }

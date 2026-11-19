@@ -351,6 +351,11 @@ def create_draft(
         row = build_row(post, draft, stance, model)
         try:
             saved = save_version(source, post, row)
+        except PostNotFound:
+            raise HTTPException(status_code=404, detail="Post not found") from None
+        except PostNotReady as error:
+            # The status changed while the draft was being written.
+            raise HTTPException(status_code=409, detail=str(error)) from None
         except StoreError as error:
             logger.error("Could not save the draft for post %s: %s", post_id, error)
             raise HTTPException(

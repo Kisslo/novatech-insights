@@ -48,12 +48,7 @@ DRAFT = {
 def supabase_env(monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co/")
     monkeypatch.setenv("SUPABASE_KEY", SUPABASE_KEY)
-    for name in (
-        "POSTS_TABLE",
-        "DRAFTS_TABLE",
-        "TOPICS_OVERVIEW_VIEW",
-        "TOPICS_ARTICLES_VIEW",
-    ):
+    for name in ("TOPICS_OVERVIEW_VIEW", "TOPICS_ARTICLES_VIEW"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -115,7 +110,14 @@ def test_check_can_generate_allows_new_and_repeated_drafts(status):
 
 
 @pytest.mark.parametrize(
-    "status", ["awaiting_angle", "awaiting_approval", "approved", "published"]
+    "status",
+    [
+        "awaiting_angle",
+        "draft_generated",  # a draft is already waiting for Kisslo
+        "awaiting_approval",
+        "approved",
+        "published",
+    ],
 )
 def test_check_can_generate_refuses_other_statuses(status):
     with pytest.raises(PostNotReady, match=f"has status '{status}'"):
@@ -124,10 +126,14 @@ def test_check_can_generate_refuses_other_statuses(status):
 
 def test_fixture_posts_cover_the_endpoint_cases():
     check_can_generate(load_post("fixture", 1))
-    check_can_generate(load_post("fixture", 3))  # new version of a draft
-    for post_id in (2, 4):
+    check_can_generate(load_post("fixture", 3))  # Kisslo asked for changes
+    for post_id in (2, 4, 6):
         with pytest.raises(PostNotReady):
             check_can_generate(load_post("fixture", post_id))
+
+
+def test_generate_from_has_no_draft_generated():
+    assert GENERATE_FROM == ("angle_received", "changes_requested")
 
 
 def test_load_topic_from_fixture():
@@ -295,117 +301,79 @@ def test_check_can_save_supabase_missing_table(supabase_env, monkeypatch):
 # -------------------- supabase: saving
 
 
-def test_save_version_supabase_inserts_next_version_then_sets_status(
-    supabase_env, monkeypatch
-):
+def database_error(code, message):
+    """An HTTPError like the one Supabase gives when a function raises."""
+    body = json.dumps({"code": "P0001", "message": message}).encode("utf-8")
+    return HTTPError("u", code, "Bad Request", {}, io.BytesIO(body))
+
+
+def test_save_version_supabase_calls_save_post_draft_once(supabase_env, monkeypatch):
     requests = fake_supabase(
-        monkeypatch,
-        {
-            ("GET", "post_drafts"): [{"version": 2}],
-            ("POST", "post_drafts"): [{"id": 55, "version": 3}],
-            ("PATCH", "posts"): [{"id": 7}],
-        },
+        monkeypatch, {("POST", "save_post_draft"): [{"draft_id": 55, "version": 3}]}
     )
-    row = build_row(POST, DRAFT, "agree", "claude-sonnet-5-5")
+    row = build_row(POST, DRAFT, "rebut", "claude-sonnet-5-5")
 
     saved = save_version("supabase", POST, row)
 
     assert saved == {"draft_id": 55, "version": 3, "status": DRAFT_STATUS}
-    assert [r.get_method() for r in requests] == ["GET", "POST", "PATCH"]
-    assert query(requests[0]) == {
-        "select": "version",
-        "post_id": "eq.7",
-        "order": "version.desc",
-        "limit": "1",
+    assert len(requests) == 1  # one call, one transaction
+    assert urlparse(requests[0].full_url).path == "/rest/v1/rpc/save_post_draft"
+    assert body(requests[0]) == {
+        "p_post_id": 7,
+        "p_article_text": "# Rubrik\n\nText",
+        "p_linkedin_text": "Kort text. Läs mer: [LÄNK]",
+        "p_reviewer_notes": row["reviewer_notes"],
+        "p_source_news_ids": [11, 12],
+        "p_stance": "rebut",
     }
-    assert body(requests[1]) == {**row, "version": 3}
-    assert requests[1].get_header("Prefer") == "return=representation"
-    assert query(requests[2]) == {
-        "id": "eq.7",
-        "status": "in.(angle_received,draft_generated,changes_requested)",
-        "select": "id",
-    }
-    assert body(requests[2]) == {"status": "draft_generated"}
-
-
-def test_save_version_supabase_first_version_is_one(supabase_env, monkeypatch):
-    requests = fake_supabase(
-        monkeypatch,
-        {
-            ("GET", "post_drafts"): [],
-            ("POST", "post_drafts"): [{"id": 1, "version": 1}],
-            ("PATCH", "posts"): [{"id": 7}],
-        },
-    )
-
-    saved = save_version("supabase", POST, {"post_id": 7})
-
-    assert saved["version"] == 1
-    assert body(requests[1])["version"] == 1
-
-
-def test_save_version_supabase_uses_table_names_from_env(supabase_env, monkeypatch):
-    monkeypatch.setenv("POSTS_TABLE", "posts_test")
-    monkeypatch.setenv("DRAFTS_TABLE", "drafts_test")
-    requests = fake_supabase(
-        monkeypatch,
-        {
-            ("GET", "drafts_test"): [],
-            ("POST", "drafts_test"): [{"id": 1, "version": 1}],
-            ("PATCH", "posts_test"): [{"id": 7}],
-        },
-    )
-
-    save_version("supabase", POST, {"post_id": 7})
-
-    assert len(requests) == 3
-
-
-def test_invalid_table_name_is_refused(supabase_env, monkeypatch):
-    monkeypatch.setenv("DRAFTS_TABLE", "post_drafts?select=*")
-
-    with pytest.raises(StoreError, match="not a valid view name"):
-        save_version("supabase", POST, {"post_id": 7})
+    assert requests[0].get_header("Apikey") == SUPABASE_KEY
 
 
 @pytest.mark.parametrize(
-    ("answer", "message"),
+    ("answer", "error", "message"),
     [
-        (HTTPError("u", 403, "Forbidden", {}, None), "Check SUPABASE_KEY"),
-        (HTTPError("u", 404, "Not Found", {}, None), "'post_drafts' was not found"),
-        (HTTPError("u", 409, "Conflict", {}, None), "saved at the same time"),
-        (HTTPError("u", 400, "Bad Request", {}, None), "HTTP 400"),
-        (URLError("no network"), "Could not reach Supabase"),
-        ([], "was not saved"),
-        ({"message": "odd"}, "Unexpected answer"),
+        (
+            database_error(400, "Post 7 cannot receive a draft in status approved"),
+            PostNotReady,
+            "cannot receive a draft in status approved",
+        ),
+        (
+            database_error(400, "Post 7 does not exist"),
+            PostNotFound,
+            "Post 7 does not exist",
+        ),
+        (HTTPError("u", 403, "Forbidden", {}, None), StoreError, "Check SUPABASE_KEY"),
+        (
+            HTTPError("u", 404, "Not Found", {}, None),
+            StoreError,
+            "Is migration 010 run",
+        ),
+        (database_error(400, "value too long"), StoreError, "HTTP 400.*value too long"),
+        (URLError("no network"), StoreError, "Could not reach Supabase"),
+        ([], StoreError, "Unexpected answer"),
+        ({"message": "odd"}, StoreError, "Unexpected answer"),
     ],
 )
-def test_save_version_supabase_failed_insert_leaves_status(
-    supabase_env, monkeypatch, answer, message
+def test_save_version_supabase_errors(
+    supabase_env, monkeypatch, answer, error, message
 ):
-    requests = fake_supabase(
-        monkeypatch,
-        {("GET", "post_drafts"): [], ("POST", "post_drafts"): answer},
-    )
+    fake_supabase(monkeypatch, {("POST", "save_post_draft"): answer})
 
-    with pytest.raises(StoreError, match=message) as caught:
-        save_version("supabase", POST, {"post_id": 7})
+    with pytest.raises(error, match=message) as caught:
+        save_version("supabase", POST, build_row(POST, DRAFT, "agree", "m"))
 
-    assert [r.get_method() for r in requests] == ["GET", "POST"]  # no PATCH
     assert SUPABASE_KEY not in str(caught.value)
 
 
-def test_save_version_supabase_reports_saved_draft_when_status_changed(
-    supabase_env, monkeypatch
-):
-    fake_supabase(
-        monkeypatch,
-        {
-            ("GET", "post_drafts"): [],
-            ("POST", "post_drafts"): [{"id": 1, "version": 1}],
-            ("PATCH", "posts"): [],  # the status no longer allows it
-        },
+def test_save_version_supabase_never_writes_tables_directly(supabase_env, monkeypatch):
+    # Migration 010 gives the backend key no INSERT or UPDATE, so any direct
+    # write would fail. fake_supabase raises KeyError for an unexpected call.
+    requests = fake_supabase(
+        monkeypatch, {("POST", "save_post_draft"): [{"draft_id": 1, "version": 1}]}
     )
 
-    with pytest.raises(StoreError, match="version 1 for post 7 was saved, but"):
-        save_version("supabase", POST, {"post_id": 7})
+    save_version("supabase", POST, build_row(POST, DRAFT, "agree", "m"))
+
+    assert [(r.get_method(), urlparse(r.full_url).path) for r in requests] == [
+        ("POST", "/rest/v1/rpc/save_post_draft")
+    ]

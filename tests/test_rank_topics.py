@@ -395,6 +395,64 @@ def test_calculate_article_contribution_uses_configured_half_life(now):
     assert result["contribution"] == pytest.approx(1.5)
 
 
+@pytest.mark.parametrize("source_weight", [0.5, 1.0, 3.0])
+def test_authority_start_factor_is_ten_times_common_weight(now, source_weight):
+    article = {
+        "source": "authority-source",
+        "source_type": "authority",
+        "published": "2026-11-01T12:00:00Z",
+    }
+    result = calculate_article_contribution(
+        article,
+        now,
+        {"authority-source": source_weight},
+        authority_bonus_half_life_days=0.7,
+    )
+    assert result["authority_base_weight"] == pytest.approx(source_weight * 1.5)
+    assert result["authority_bonus"] == pytest.approx(source_weight * 8.5)
+    assert result["contribution"] == pytest.approx(source_weight * 10.0)
+
+
+def test_authority_total_start_factor_is_independent_of_base_factor(now):
+    article = {
+        "source": "authority-source",
+        "source_type": "authority",
+        "published": "2026-11-01T12:00:00Z",
+    }
+    result = calculate_article_contribution(
+        article,
+        now,
+        {"authority-source": 2.0},
+        authority_base_factor=2.5,
+        authority_total_start_factor=10.0,
+    )
+    assert result["authority_base_weight"] == pytest.approx(5.0)
+    assert result["authority_bonus"] == pytest.approx(15.0)
+    assert result["contribution"] == pytest.approx(20.0)
+
+
+def test_authority_bonus_has_own_half_life_and_common_decay(now):
+    article = {
+        "source": "authority-source",
+        "source_type": "authority",
+        "published": "2026-10-25T12:00:00Z",
+    }
+    result = calculate_article_contribution(
+        article,
+        now,
+        {"authority-source": 1.0},
+        authority_bonus_half_life_days=0.7,
+    )
+    assert result["authority_bonus_time_weight"] == pytest.approx(0.5**10)
+    assert result["time_weight"] == pytest.approx(0.5 ** (7 / 3))
+
+
+def test_unclassified_articles_have_the_existing_contribution(now):
+    article = {"source": "ordinary", "published": "2026-10-29T12:00:00Z"}
+    result = calculate_article_contribution(article, now, {"ordinary": 2.0})
+    assert result["contribution"] == pytest.approx(1.0)
+
+
 def test_calculate_article_contribution_rejects_future_publication(now):
     article = {"source": "IMY", "published": "2026-11-01T13:00:00Z"}
     with pytest.raises(ValueError, match="five-minute future tolerance"):
@@ -699,6 +757,9 @@ def test_calculate_topic_ranking_records_configuration(now, ranking_weights):
         "half_life_days": 6,
         "default_source_weight": 2.0,
         "previous_days": 2,
+        "authority_base_factor": 1.5,
+        "authority_total_start_factor": 10.0,
+        "authority_bonus_half_life_days": 0.7,
         "future_tolerance_seconds": 300.0,
         "source_weights": {"IMY": 3.0},
         "swedish_sources": ["IMY", "Skatteverket"],

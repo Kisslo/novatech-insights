@@ -12,7 +12,9 @@ def test_loads_settings_and_derives_swedish_sources(tmp_path):
         '{"half_life_days": 3, "default_source_weight": 1.0, '
         '"previous_days": 6, "max_breadth_bonus": 1.0, "breadth_scale": 3.0, '
         '"max_velocity_bonus": 1.0, "velocity_scale": 5.0, '
-        '"swedish_weight": 0.5, "score_version": "test", '
+        '"swedish_weight": 0.5, "authority_base_factor": 1.5, '
+        '"authority_total_start_factor": 10.0, '
+        '"authority_bonus_half_life_days": 0.7, "score_version": "test", '
         '"source_weights": {" Reuters ": 2.0}}',
         encoding="utf-8",
     )
@@ -51,6 +53,9 @@ def test_rejects_invalid_numeric_settings(tmp_path, field, value):
         "max_velocity_bonus": 1.0,
         "velocity_scale": 5.0,
         "swedish_weight": 0.5,
+        "authority_base_factor": 1.5,
+        "authority_total_start_factor": 10.0,
+        "authority_bonus_half_life_days": 0.7,
         "score_version": "test",
         "source_weights": {},
     }
@@ -70,6 +75,8 @@ def test_rejects_source_registry_without_required_columns(tmp_path):
         '{"half_life_days": 3, "default_source_weight": 1, '
         '"previous_days": 6, "max_breadth_bonus": 1, "breadth_scale": 3, '
         '"max_velocity_bonus": 1, "velocity_scale": 5, "swedish_weight": 0.5, '
+        '"authority_base_factor": 1.5, "authority_total_start_factor": 10, '
+        '"authority_bonus_half_life_days": 0.7, '
         '"score_version": "test", "source_weights": {}}',
         encoding="utf-8",
     )
@@ -77,4 +84,22 @@ def test_rejects_source_registry_without_required_columns(tmp_path):
     sources_path.write_text("name,feed_url\nA,https://a.test\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="name, feed_url, and language"):
+        load_ranking_config(config_path, sources_path)
+
+
+def test_rejects_authority_base_above_total_start_factor(tmp_path):
+    config_path = tmp_path / "ranking.json"
+    config_path.write_text(
+        '{"half_life_days": 3, "default_source_weight": 1, '
+        '"previous_days": 6, "max_breadth_bonus": 1, "breadth_scale": 3, '
+        '"max_velocity_bonus": 1, "velocity_scale": 5, "swedish_weight": 0.5, '
+        '"authority_base_factor": 11, "authority_total_start_factor": 10, '
+        '"authority_bonus_half_life_days": 0.7, "score_version": "test", '
+        '"source_weights": {}}',
+        encoding="utf-8",
+    )
+    sources_path = tmp_path / "sources.csv"
+    sources_path.write_text("name,feed_url,language\nA,https://a.test,en\n")
+
+    with pytest.raises(ValueError, match="must not exceed"):
         load_ranking_config(config_path, sources_path)

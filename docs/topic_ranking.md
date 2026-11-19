@@ -137,6 +137,9 @@ With the default bonus maxima, breadth and velocity each add up to 100% of artic
 | `max_velocity_bonus` | `1.0` | Maximum additional velocity factor |
 | `velocity_scale` | `5.0` | Velocity giving half the maximum velocity factor |
 | `swedish_weight` | `0.50` | Multiplier for Swedish article contributions |
+| `authority_base_factor` | `1.5` | Authority base weight relative to the ordinary source weight |
+| `authority_total_start_factor` | `10.0` | New authority article's total factor relative to the ordinary source weight |
+| `authority_bonus_half_life_days` | `0.7` | Additional half-life for the temporary authority start bonus |
 | `score_version` | `preliminary-v2` | Identifier included with the calculated score |
 | `top_n` | `None` | Return all ranked topics unless a limit is supplied |
 
@@ -174,6 +177,46 @@ Each returned topic contains:
 - `config`: `half_life_days`, `default_source_weight`, `previous_days`, `future_tolerance_seconds`, `source_weights`, and `swedish_sources`.
 
 Individual article contributions use `news_id` to identify the input article. They include `source_weight`, `time_weight`, and `contribution`.
+
+## Authority-source weighting
+
+The adapter reads `source_type` from `public.source_registry` and matches it
+to an article through `source_normalized`. Only `source_type = 'authority'`
+gets the authority weighting. `media`, `NULL`, and missing registry rows
+remain rankable with the ordinary calculation and receive no authority
+weighting. A registry read failure is an input failure, not an instruction to
+treat every source as unclassified.
+
+For an ordinary article, the existing contribution remains:
+
+```text
+ordinary_contribution = common_source_weight * time_weight
+```
+
+For an authority article, the common source weight is used as the reference:
+
+```text
+authority_base = common_source_weight * authority_base_factor
+authority_start_bonus = common_source_weight
+    * (authority_total_start_factor - authority_base_factor)
+    * authority_bonus_time_weight
+article_contribution = (authority_base + authority_start_bonus)
+    * time_weight
+```
+
+The first configuration is `authority_base_factor = 1.5`,
+`authority_total_start_factor = 10.0`, and
+`authority_bonus_half_life_days = 0.7`. Thus a new authority article starts
+at ten times its ordinary source weight, not ten times its authority base
+weight. Only the start bonus uses the additional 0.7-day half-life. The
+existing article time decay is then applied once to the complete article
+contribution, so the authority base remains at a 1.5 ratio to an ordinary
+article with the same source weight as the article ages.
+
+The authority contribution is already included in the existing `base`
+article score. The breakdown reports `authority_base_score`,
+`authority_bonus_score`, and per-article authority fields for explanation;
+it does not add the bonus a second time to the final score.
 
 ## Configuration and Supabase adapter
 

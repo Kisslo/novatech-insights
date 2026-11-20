@@ -3,18 +3,31 @@
 import argparse
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
 from dotenv import load_dotenv
 
 if __package__:
+    from .pipeline_monitoring import (
+        PipelineMonitoringError,
+        build_supabase_request,
+        create_pipeline_run,
+        finish_pipeline_run,
+    )
     from .rank_topics import rank_topics
     from .ranking_config import load_ranking_config, validate_ranking_config
     from .source_normalization import normalize_source
 else:
+    from pipeline_monitoring import (
+        PipelineMonitoringError,
+        build_supabase_request,
+        create_pipeline_run,
+        finish_pipeline_run,
+    )
     from rank_topics import rank_topics
     from ranking_config import load_ranking_config, validate_ranking_config
     from source_normalization import normalize_source
@@ -34,15 +47,7 @@ class SupabaseReadError(RuntimeError):
 
 
 def request_json(url, key, *, method="GET", payload=None):
-    headers = {"apikey": key, "Content-Type": "application/json"}
-    if method == "PATCH":
-        headers["Prefer"] = "return=representation"
-    request = Request(
-        url,
-        headers=headers,
-        method=method,
-        data=None if payload is None else json.dumps(payload).encode("utf-8"),
-    )
+    request = build_supabase_request(url, key, method=method, payload=payload)
     try:
         with urlopen(request, timeout=60) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -182,19 +187,132 @@ def update_topic(url, key, topic_id, values):
         raise RuntimeError(f"Supabase did not confirm the update for topic {topic_id}.")
 
 
-def run_ranking(*, url, key, write=False, now=None, config=None):
+def calculate_run_status(
+    *,
+    mode,
+    topics_total,
+    calculated,
+    skipped,
+    calculation_errors,
+    writes_confirmed,
+    writes_failed,
+    run_error,
+    warnings=(),
+):
+    if run_error is not None:
+        return "failed"
+    if topics_total == 0:
+        return "no_data"
+    if mode == "read_only":
+        if not calculated:
+            return "failed" if calculation_errors else "no_data"
+        return "success" if len(calculated) == topics_total else "partial"
+
+    delivered = len(set(calculated) & set(writes_confirmed))
+    has_technical_error = bool(calculation_errors or writes_failed)
+    if delivered == 0:
+        if len(skipped) == topics_total and not has_technical_error:
+            return "no_data"
+        return "failed"
+    if (
+        delivered == topics_total
+        and len(calculated) == topics_total
+        and not has_technical_error
+    ):
+        return "success"
+    return "partial"
+
+
+def build_pipeline_values(
+    *,
+    status,
+    finished_at,
+    topics_total,
+    calculated,
+    skipped,
+    calculation_errors,
+    write_errors,
+    writes_confirmed,
+    writes_failed,
+    warnings,
+    run_error,
+    monitoring_error=None,
+):
+    return {
+        "status": status,
+        "finished_at": finished_at,
+        "metrics": {
+            "topics_total": topics_total,
+            "topics_calculated": len(calculated),
+            "topics_skipped": len(skipped),
+            "calculation_errors": len(calculation_errors),
+            "writes_confirmed": len(writes_confirmed),
+            "writes_failed": len(writes_failed),
+            "warning_count": len(warnings),
+        },
+        "details": {
+            "calculation_errors": calculation_errors,
+            "write_errors": write_errors,
+            "skipped": skipped,
+            "warnings": warnings,
+            "run_error": run_error,
+            "monitoring_error": monitoring_error,
+        },
+    }
+
+
+def run_ranking(*, url, key, write=False, now=None, config=None, correlation_id=None):
     if not url or not key:
         raise ValueError("SUPABASE_URL and SUPABASE_KEY are required.")
     url = url.rstrip("/")
-    config = load_ranking_config() if config is None else config
-    validate_ranking_config(config)
     run_now = now or datetime.now(timezone.utc)
-    topics, warnings = read_input(url, key)
+    mode = "write" if write else "read_only"
+    run_identity = create_pipeline_run(
+        request_json,
+        url=url,
+        key=key,
+        stage="ranking",
+        mode=mode,
+        correlation_id=correlation_id,
+        metrics={
+            "topics_total": None,
+            "topics_calculated": 0,
+            "topics_skipped": 0,
+            "calculation_errors": 0,
+            "writes_confirmed": 0,
+            "writes_failed": 0,
+            "warning_count": 0,
+        },
+        details={
+            "calculation_errors": {},
+            "write_errors": {},
+            "skipped": {},
+            "warnings": [],
+            "run_error": None,
+            "monitoring_error": None,
+        },
+    )
+    run_id = run_identity["run_id"]
+
     results = []
     errors = {}
+    calculation_errors = {}
+    write_errors = {}
     skipped = {}
     calculated = []
     write_results = {"requested": write, "confirmed": [], "failed": []}
+    warnings = []
+    topics_total = None
+    run_error = None
+    try:
+        config = load_ranking_config() if config is None else config
+        validate_ranking_config(config)
+        topics, warnings = read_input(url, key)
+        topics_total = len(topics)
+    except (SupabaseReadError, OSError, TypeError, ValueError) as error:
+        run_error = str(error)
+        topics = []
+
     for topic in topics:
         try:
             ranked = rank_topics(
@@ -223,6 +341,7 @@ def run_ranking(*, url, key, write=False, now=None, config=None):
             ValueError,
         ) as error:
             errors[topic["id"]] = f"calculation failed: {error}"
+            calculation_errors[str(topic["id"])] = str(error)
             continue
         if ranked:
             values = {field: ranked[0][field] for field in RANKING_FIELDS}
@@ -239,9 +358,30 @@ def run_ranking(*, url, key, write=False, now=None, config=None):
             except RuntimeError as error:
                 write_results["failed"].append(item["topic_id"])
                 errors[item["topic_id"]] = f"write failed: {error}"
+                write_errors[str(item["topic_id"])] = str(error)
             else:
                 write_results["confirmed"].append(item["topic_id"])
-    return {
+    status = calculate_run_status(
+        mode=mode,
+        topics_total=topics_total,
+        calculated=calculated,
+        skipped=skipped,
+        calculation_errors=calculation_errors,
+        writes_confirmed=write_results["confirmed"],
+        writes_failed=write_results["failed"],
+        run_error=run_error,
+    )
+    result = {
+        "run_id": run_id,
+        "correlation_id": run_identity["correlation_id"],
+        "status": status,
+        "details": {
+            "calculation_errors": calculation_errors,
+            "write_errors": write_errors,
+            "skipped": skipped,
+            "warnings": warnings,
+            "run_error": run_error,
+        },
         "topics": results,
         "errors": errors,
         "skipped": skipped,
@@ -250,20 +390,69 @@ def run_ranking(*, url, key, write=False, now=None, config=None):
         "writes": write_results,
         "written": bool(write_results["confirmed"]),
     }
+    pipeline_values = build_pipeline_values(
+        status=status,
+        finished_at=datetime.now(timezone.utc).isoformat(),
+        topics_total=topics_total,
+        calculated=calculated,
+        skipped=skipped,
+        calculation_errors=calculation_errors,
+        write_errors=write_errors,
+        writes_confirmed=write_results["confirmed"],
+        writes_failed=write_results["failed"],
+        warnings=warnings,
+        run_error=run_error,
+    )
+    try:
+        finish_pipeline_run(
+            request_json,
+            url=url,
+            key=key,
+            run_id=run_id,
+            stage="ranking",
+            status=pipeline_values["status"],
+            finished_at=pipeline_values["finished_at"],
+            metrics=pipeline_values["metrics"],
+            details=pipeline_values["details"],
+        )
+    except PipelineMonitoringError as error:
+        result["monitoring_error"] = str(error)
+        print(f"Ranking monitoring error: {error}", file=sys.stderr)
+    else:
+        result["monitoring_error"] = None
+    return result
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Rank topics using Supabase data.")
-    parser.add_argument("--write", action="store_true", help="Persist ranking fields.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Rank topics using Supabase data. Run history is persisted for both "
+            "read-only and write modes."
+        )
+    )
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="Persist ranking fields; omit to run without updating topics.",
+    )
     args = parser.parse_args()
     load_dotenv(os.path.join(ROOT, ".env"))
-    result = run_ranking(
-        url=os.getenv("SUPABASE_URL", "").strip(),
-        key=os.getenv("SUPABASE_KEY", "").strip(),
-        write=args.write,
-    )
+    try:
+        result = run_ranking(
+            url=os.getenv("SUPABASE_URL", "").strip(),
+            key=os.getenv("SUPABASE_KEY", "").strip(),
+            write=args.write,
+        )
+    except PipelineMonitoringError as error:
+        print(f"Ranking monitoring error: {error}", file=sys.stderr)
+        return 1
     mode = "write requested" if args.write else "read-only"
-    print(f"Finished in {mode} mode: {len(result['topics'])} topics.")
+    print(
+        f"Finished in {mode} mode: {len(result['topics'])} topics "
+        f"(run {result['run_id']}, status {result['status']})."
+    )
+    if not args.write:
+        print("Read-only mode: topic ranking fields were not written.")
     print(
         f"Calculated: {len(result['calculated'])}; "
         f"skipped: {len(result['skipped'])}; "
@@ -276,7 +465,15 @@ def main():
         print(f"Skipped topic {topic_id}: {reason}")
     for topic_id, error in result["errors"].items():
         print(f"Topic {topic_id}: {error}")
-    return 1 if result["errors"] else 0
+    if result["details"]["run_error"]:
+        print(f"Ranking run error: {result['details']['run_error']}", file=sys.stderr)
+    return (
+        1
+        if result["errors"]
+        or result["monitoring_error"]
+        or result["details"]["run_error"]
+        else 0
+    )
 
 
 if __name__ == "__main__":

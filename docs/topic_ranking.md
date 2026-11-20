@@ -298,6 +298,18 @@ together for each topic:
 - `score_version`
 - `score_breakdown`
 
+Both modes persist one execution record in `public.pipeline_runs`.
+Read-only mode records the ranking run but never updates topic ranking
+fields. A successful write-mode run is the only mode counted as the latest
+successful ranking.
+
+The execution record stores the run ID, mode, status, timestamps, counters,
+warnings, skipped topic reasons, calculation errors and write errors.
+If execution-history creation cannot be confirmed, ranking aborts before any
+topic write. If the final execution-history update cannot be confirmed, the
+ranking result remains available in the process result, but the monitoring
+error is reported separately and the process exits non-zero.
+
 ### Database prerequisites
 
 Before live ranking, apply the existing topic-storage migrations in order:
@@ -307,6 +319,10 @@ Before live ranking, apply the existing topic-storage migrations in order:
 3. `sql/004_create_topic_read_views.sql`
 4. `sql/005_save_topic_group.sql`
 5. `sql/006_topic_backend_permissions.sql`
+6. `sql/007_require_normalized_sources.sql` after verified backfill
+7. `sql/008_create_topic_status_and_posts.sql`
+8. `sql/009_create_source_registry.sql`
+9. `sql/011_create_pipeline_runs.sql`
 
 Migration 006 provides the backend `service_role` access needed by the
 adapter: read access to `news`, `topics`, `topic_articles` and the topic read
@@ -314,6 +330,9 @@ views, plus update access to the four ranking fields. `service_role` bypasses
 RLS but still requires these SQL grants. The role and live REST access must be
 verified in the target Supabase project; local SQL permission tests do not
 prove live API access.
+
+Migration 011 grants the backend role access to create and finish ranking
+execution-history rows. Run the pipeline-run SQL test after applying it.
 
 Existing articles must first be normalized and verified using the repository's
 source-key backfill. Complete and verify that backfill before applying

@@ -103,6 +103,33 @@ def test_read_only_ranks_all_memberships_and_does_not_write(monkeypatch):
     )
 
 
+def test_standalone_ranking_run_creates_separate_correlation_id(monkeypatch):
+    calls = []
+    monkeypatch.setattr(adapter, "request_json", paged_request(rows(), calls))
+
+    result = adapter.run_ranking(
+        url="https://example.test", key="secret", now=NOW, config=CONFIG
+    )
+
+    assert result["correlation_id"] != result["run_id"]
+
+
+def test_related_ranking_run_reuses_correlation_id(monkeypatch):
+    calls = []
+    monkeypatch.setattr(adapter, "request_json", paged_request(rows(), calls))
+
+    result = adapter.run_ranking(
+        url="https://example.test",
+        key="secret",
+        now=NOW,
+        config=CONFIG,
+        correlation_id="10000000-0000-0000-0000-000000000020",
+    )
+
+    assert result["correlation_id"] == "10000000-0000-0000-0000-000000000020"
+    assert result["run_id"] != result["correlation_id"]
+
+
 def test_normalized_ranking_copy_merges_variants_without_mutating_input(monkeypatch):
     data = rows()
     data["topic_articles"] = [

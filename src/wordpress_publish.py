@@ -29,6 +29,7 @@ import base64
 import json
 import os
 import re
+import socket
 from dataclasses import dataclass, field
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -57,7 +58,15 @@ class WordPressError(Exception):
     """WordPress could not be reached or refused the post.
 
     The message is written for the server log. It never contains the password.
+    not_created is True when WordPress surely did not save the post (it
+    answered with a 4xx error, or could not be reached at all). Then the
+    publishing can safely be tried again. After a timeout or a 5xx answer
+    the post may exist, so not_created is False.
     """
+
+    def __init__(self, message: str, *, not_created: bool = False) -> None:
+        super().__init__(message)
+        self.not_created = not_created
 
 
 class WordPressConfigError(WordPressError):
@@ -290,14 +299,23 @@ def create_post(settings: WordPressSettings, payload: dict) -> dict:
             data = json.loads(response.read().decode("utf-8"))
     except HTTPError as error:
         code = wordpress_message(error)
+        refused = error.code < 500
         if error.code in (401, 403):
             raise WordPressError(
                 f"WordPress refused the post (HTTP {error.code} {code}). "
-                "Check WORDPRESS_USER, the application password and the user's role."
+                "Check WORDPRESS_USER, the application password and the user's role.",
+                not_created=True,
             ) from None
-        raise WordPressError(f"WordPress answered HTTP {error.code} {code}.") from None
+        raise WordPressError(
+            f"WordPress answered HTTP {error.code} {code}.", not_created=refused
+        ) from None
     except (URLError, OSError) as error:
-        raise WordPressError(f"Could not reach WordPress ({error}).") from None
+        reason = getattr(error, "reason", error)
+        # No connection at all (refused, unknown host): nothing was sent.
+        unreachable = isinstance(reason, (ConnectionRefusedError, socket.gaierror))
+        raise WordPressError(
+            f"Could not reach WordPress ({error}).", not_created=unreachable
+        ) from None
     except ValueError:
         raise WordPressError("WordPress did not answer with JSON.") from None
 

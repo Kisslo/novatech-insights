@@ -124,12 +124,15 @@ def error_message(error: HTTPError) -> str:
     return message if isinstance(message, str) else ""
 
 
-def call_function(name: str, arguments: dict) -> list[dict]:
+def call_function(name: str, arguments: dict, migration: str = "010") -> list[dict]:
     """Call a database function through /rest/v1/rpc/<name>. Returns its rows.
 
     The database answers HTTP 400 with the text of RAISE EXCEPTION when the
     function refuses. Those texts are turned into PostNotFound and
-    PostNotReady, so the endpoint can answer 404 and 409.
+    PostNotReady, so the endpoint can answer 404 and 409: "Post <id> does
+    not exist" and "Post <id> cannot ..." (a draft or publishing refused).
+    `migration` is the migration that creates the function, for the error
+    message when it is missing.
     """
     base_url, key = supabase_settings()
     request = Request(
@@ -145,7 +148,7 @@ def call_function(name: str, arguments: dict) -> list[dict]:
         message = error_message(error)
         if "does not exist" in message and message.startswith("Post "):
             raise PostNotFound(message) from error
-        if "cannot receive a draft" in message:
+        if message.startswith("Post ") and " cannot " in message:
             raise PostNotReady(message) from error
         if error.code in (401, 403):
             raise StoreError(
@@ -154,7 +157,8 @@ def call_function(name: str, arguments: dict) -> list[dict]:
             ) from error
         if error.code == 404:
             raise StoreError(
-                f"Function '{name}' was not found in Supabase. Is migration 010 run?"
+                f"Function '{name}' was not found in Supabase. "
+                f"Is migration {migration} run?"
             ) from error
         raise StoreError(
             f"Supabase answered HTTP {error.code} for '{name}': {message[:200]}"

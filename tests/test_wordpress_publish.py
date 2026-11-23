@@ -265,3 +265,24 @@ def test_create_post_refuses_answer_without_id(monkeypatch):
     )
     with pytest.raises(WordPressError, match="no post id"):
         create_post(SETTINGS, {})
+
+
+@pytest.mark.parametrize(
+    ("error", "not_created"),
+    [
+        (http_error(400, {"code": "rest_invalid_param"}), True),
+        (http_error(403, {"code": "rest_cannot_create"}), True),
+        (http_error(502, {}), False),  # a proxy error: the post may exist
+        (URLError(ConnectionRefusedError()), True),
+        (URLError(TimeoutError("timed out")), False),  # the answer may be lost
+        (TimeoutError("timed out"), False),
+    ],
+)
+def test_create_post_tells_if_post_surely_not_created(monkeypatch, error, not_created):
+    def fake_urlopen(request, timeout):
+        raise error
+
+    monkeypatch.setattr(wp, "urlopen", fake_urlopen)
+    with pytest.raises(WordPressError) as raised:
+        create_post(SETTINGS, {})
+    assert raised.value.not_created is not_created

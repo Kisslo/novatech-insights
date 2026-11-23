@@ -179,7 +179,7 @@ returns the messages; n8n sends them and handles the presses.
 
 | Button | `callback_data` | What happens | Status |
 |---|---|---|---|
-| Publicera | `publish:<post_id>:<version>` | This version is published on the website | WordPress publishing, separate issue |
+| Publicera | `publish:<post_id>:<version>` | This version is sent to WordPress | `POST /drafts/{post_id}/publish`, see [Publishing to WordPress](#publishing-to-wordpress) (#81) |
 | Ändra | `revise:<post_id>:<version>` | Kisslo writes what he wants changed, and a new version is made from this one and his text | #67 |
 | Skippa | `keep:<post_id>:<version>` | The draft is kept in `post_drafts` (it is already paid for); nothing more happens | Status value in a follow-up migration (proposal `draft_kept`) |
 
@@ -270,9 +270,170 @@ uv run python src/draft_article.py --topic-id 101 --angle "Småföretag ska inte
 - On 409 or 502, tell Kisslo that the draft could not be written; on 502 a
   new try is safe.
 
+## Publishing to WordPress
+
+`POST /drafts/{post_id}/publish` sends the version Kisslo approved to
+novatech-solutions.se through the WordPress REST API (issue #81). n8n calls
+it when Kisslo presses **Publicera** (`publish:<post_id>:<version>`).
+Decided: articles are published on WordPress (Kisslo, 14 Nov), and the
+first version creates a **draft** in WordPress that Kisslo publishes there
+himself (23 Nov). The code is in `src/publish_api.py`,
+`src/publish_store.py` and `src/wordpress_publish.py`.
+
+```http
+POST /drafts/{post_id}/publish
+X-API-Key: <TELEGRAM_API_KEY>
+Content-Type: application/json
+
+{"version": 3}
+```
+
+| Part | Required | Meaning |
+|---|---|---|
+| `post_id` | yes | `posts.id` |
+| body `version` | yes | The version in the button's `callback_data`, the one Kisslo read. Other fields are refused (422) |
+| `?dry_run=true` | no | Run all checks and return the HTML and the payload. Nothing is sent or saved |
+
+### Checks before anything is sent
+
+1. The post exists (404) and its status is `draft_generated` (409).
+   `published` gives 409 with the saved link, and `publish_requested` gives
+   409 "check WordPress" (see below).
+2. `version` is the latest draft of the post. An older version gives 409:
+   Kisslo read a draft that has since been replaced.
+3. The article and the LinkedIn post have no `[UNVERIFIED]` tags, and the
+   article has no placeholders such as `[LÄNK]` or `[NAMN]`. Otherwise 409
+   with the reasons; Kisslo uses **Ändra** (#67). `[LÄNK]` is allowed in the
+   LinkedIn post: it is replaced with the article's link.
+4. `WORDPRESS_URL`, `WORDPRESS_USER` and `WORDPRESS_APP_PASSWORD` are set
+   (500 otherwise).
+
+### What is sent
+
+Only the article. The reviewer notes are never read, and the LinkedIn
+post is not sent. The `# ` headline becomes the post's title, and the rest
+is turned into HTML: `## ` headings, paragraphs, the source list as a
+list, `**bold**` and http(s) links. All other text is escaped, so nothing in
+a draft can become a tag on the website.
+
+```json
+{"title": "Skriv ner var ni använder AI innan reglerna är klara",
+ "content": "<p>Många småföretag …</p>\n<h2>…</h2>\n…\n<h2>Källor</h2>\n<ul>\n<li>…</li>\n</ul>",
+ "status": "draft",
+ "categories": [5]}
+```
+
+`categories` is only sent when `WORDPRESS_CATEGORY_ID` is set. The author
+is the WordPress user of the application password.
+
+### Two steps, no duplicates
+
+Publishing is saved in two steps, each one a database function (migration
+013, Nosheen), so a retry can never create a second WordPress post:
+
+| Step | Function | What it does |
+|---|---|---|
+| 1 | `request_publish(p_post_id, p_version)` | Locks the post, checks the status and that the version is the latest, sets `publish_requested`. Returns `draft_id` and `version` |
+| – | WordPress | `POST /wp-json/wp/v2/posts` |
+| 2 | `mark_post_published(p_post_id, p_draft_id, p_wordpress_post_id, p_published_url)` | Sets `published`, `approved_draft_id`, `wordpress_post_id`, `published_url` and `published_at` |
+| or | `cancel_publish_request(p_post_id)` | Back to `draft_generated` when WordPress surely did not create the post |
+
+| What happens | Answer | Status afterwards | A new call |
+|---|---|---|---|
+| Success | 200 | `published` | 409 with the link, no new post |
+| WordPress refused (4xx, for example a wrong password) or could not be reached | 502 "did not create the post" | `draft_generated` | Safe |
+| No answer from WordPress (timeout, 5xx) | 502 "the post may exist" | `publish_requested` | 409 until someone has checked WordPress |
+| The post was created but the result could not be saved | 502 | `publish_requested` | 409; the WordPress id and URL are in the server log |
+
+A post stuck in `publish_requested` is fixed by hand: if the post exists
+in WordPress, save its id and URL in `posts` and set `published`;
+otherwise set `draft_generated`.
+
+The function texts that the endpoint reads: `Post <id> does not exist`
+(404) and `Post <id> cannot …` (409), for example `Post 7 cannot be
+published in status published`.
+
+### Response
+
+```json
+{
+  "dry_run": false,
+  "source": "fixture",
+  "post_id": 1,
+  "version": 3,
+  "draft_id": null,
+  "status": "published",
+  "wordpress_post_id": 42,
+  "wordpress_status": "draft",
+  "url": "http://localhost:8080/?p=42",
+  "edit_url": "http://localhost:8080/wp-admin/post.php?post=42&action=edit",
+  "published_at": "2026-11-23T16:35:12+01:00",
+  "linkedin": "Många småföretag väntar … Läs mer: http://localhost:8080/?p=42",
+  "messages": [
+    {"text": "<b>Utkast i WordPress v3: Skriv ner var ni använder AI innan reglerna är klara</b>\n\nArtikeln är sparad som utkast i WordPress. Granska och publicera den där: <a href=\"…\">Öppna i WordPress</a>\nLänken i LinkedIn-inlägget fungerar när artikeln är publicerad.", "parse_mode": "HTML"},
+    {"text": "<b>LinkedIn-inlägg att posta</b>\n\nMånga småföretag väntar … Läs mer: http://localhost:8080/?p=42", "parse_mode": "HTML"}
+  ]
+}
+```
+
+`status` is the post's status in our database; `wordpress_status` is the
+post's status in WordPress (`draft` or `publish`). With
+`WORDPRESS_POST_STATUS=publish` the first message says "Publicerad" and
+links to the article. A WordPress draft link (`?p=42`) only works for
+readers after the article is published. LinkedIn is never posted
+automatically: Kisslo copies the text.
+
+### Errors
+
+| Status | When |
+|---|---|
+| 401 | `X-API-Key` missing or wrong |
+| 404 | No post with this id |
+| 409 | Wrong status, old version, `[UNVERIFIED]` or a placeholder left, already published, or publishing in progress |
+| 422 | Missing or invalid `version`, or another field |
+| 500 | `WORDPRESS_*` or `TELEGRAM_SOURCE` missing or invalid |
+| 502 | WordPress or Supabase failed (see the table above). With `TELEGRAM_SOURCE=supabase` before migration 013, every call gives 502 "Could not read the post" |
+
+### Settings in .env
+
+| Variable | Meaning |
+|---|---|
+| `WORDPRESS_URL` | For example `https://novatech-solutions.se`. Only https; plain http only for `localhost` |
+| `WORDPRESS_USER` | The WordPress user that writes the posts. The role Author is enough |
+| `WORDPRESS_APP_PASSWORD` | An application password for that user (Users → Profile → Application passwords), never the login password. Only in `.env`, never in Teams, logs or answers |
+| `WORDPRESS_POST_STATUS` | `draft` (default) or `publish` |
+| `WORDPRESS_CATEGORY_ID` | Optional category id; empty means the WordPress default category |
+
+### Test against a local WordPress
+
+A WordPress in Docker on `http://localhost:8080` (WordPress and MariaDB,
+with `WORDPRESS_CONFIG_EXTRA: define('WP_ENVIRONMENT_TYPE', 'local');` so
+that application passwords work without https). Create a user with the role
+Author and an application password, and point `.env` at it. With
+`TELEGRAM_SOURCE=fixture` a post with a saved draft in `output/drafts/`
+counts as `draft_generated`, and the result is saved in
+`output/published/post_<id>.json` (ignored by Git; delete it to publish
+again).
+
+```powershell
+$h = @{ "X-API-Key" = (Select-String -Path .env -Pattern '^TELEGRAM_API_KEY=(.*)').Matches.Groups[1].Value }
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/drafts/1/publish?dry_run=true" -Headers $h -ContentType "application/json" -Body '{"version": 3}'
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/drafts/1/publish" -Headers $h -ContentType "application/json" -Body '{"version": 3}'
+```
+
+### Settings in n8n
+
+- On the button `publish:<post_id>:<version>`: **HTTP Request node**
+  `POST https://<name>.ngrok-free.dev/drafts/{{ $json.post_id }}/publish`
+  with the same headers as for `/drafts`, body
+  `{"version": {{ $json.version }}}`, timeout 60 seconds.
+- On 200: **Loop over `messages`** and send each one with parse mode HTML.
+- On 409 or 502: show `detail` to Kisslo. After 502 "did not create the
+  post" a new press is safe; after any other 502, check WordPress first.
+
 ## Out of scope
 
-Handling the button presses (n8n), publishing to WordPress, revising a draft
+Handling the button presses (n8n), revising a draft
 from Kisslo's change request (#67), searching for more supporting articles or
 research, pasted links or text, counterpoints in the top 5 (#55) and the
 source check with a separate model (#33).

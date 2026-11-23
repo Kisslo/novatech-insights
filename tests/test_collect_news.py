@@ -1,7 +1,9 @@
+import io
 from datetime import UTC, datetime
 
 import pytest
 
+from src import collect_news
 from src.collect_news import clean_description, format_date, parse_date
 
 
@@ -86,3 +88,36 @@ def test_clean_description_returns_normalized_plain_text(value, expected):
     result = clean_description(value)
 
     assert result == expected
+
+
+def test_main_reports_failed_feed_and_empty_feed(tmp_path, monkeypatch, capsys):
+    sources_file = tmp_path / "sources.csv"
+    sources_file.write_text(
+        "name,feed_url\n"
+        "Slow feed,https://example.com/slow.xml\n"
+        "Empty feed,https://example.com/empty.xml\n",
+        encoding="utf-8",
+    )
+    output_file = tmp_path / "news.csv"
+
+    monkeypatch.setattr(collect_news, "SOURCES_FILE", sources_file)
+    monkeypatch.setattr(collect_news, "OUTPUT_FILE", output_file)
+
+    empty_rss = b"<rss><channel><title>Empty</title></channel></rss>"
+
+    def fake_urlopen(request, timeout):
+        if request.full_url.endswith("slow.xml"):
+            raise TimeoutError("timed out")
+        return io.BytesIO(empty_rss)
+
+    monkeypatch.setattr(collect_news.urllib.request, "urlopen", fake_urlopen)
+
+    collect_news.main()
+
+    output = capsys.readouterr().out
+    assert "Feed failed: Slow feed (TimeoutError: timed out)" in output
+    assert "Feed read successfully: Empty feed (no new articles added)" in output
+    assert "Feeds read successfully: 1" in output
+    assert "Feeds failed: 1" in output
+    assert "Total new articles: 0" in output
+    assert output_file.exists()

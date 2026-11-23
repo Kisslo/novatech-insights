@@ -1,8 +1,9 @@
 """Small API for n8n: the top N topics as ready Telegram messages (issue #42).
 
-Endpoints, both with header X-API-Key: <TELEGRAM_API_KEY>:
+Endpoints, all with header X-API-Key: <TELEGRAM_API_KEY>:
     GET /telegram/top?n=5     this file
     POST /drafts/{post_id}    draft_api.py (issue #30), added to the app below
+    POST /drafts/{post_id}/publish   publish_api.py (issue #81), added below
 
 GET /telegram/top only reads. It never calls Claude and never writes to
 Supabase: labels are made in advance with
@@ -35,6 +36,7 @@ from label_topics import (
     load_supabase,
     select_top,
 )
+from publish_api import router as publish_router
 from telegram_format import format_topic
 
 load_dotenv()
@@ -74,6 +76,8 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
 # POST /drafts/{post_id} lives in draft_api.py (issue #30). It gets the same
 # API key check as /telegram/top.
 app.include_router(draft_router, dependencies=[Depends(require_api_key)])
+# POST /drafts/{post_id}/publish lives in publish_api.py (issue #81).
+app.include_router(publish_router, dependencies=[Depends(require_api_key)])
 
 
 def check_message(topic: dict) -> None:

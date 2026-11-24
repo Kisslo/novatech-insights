@@ -17,6 +17,7 @@ def test_create_standalone_run_creates_separate_correlation_id():
     calls = []
 
     def request_json(url, key, *, method="GET", payload=None):
+        assert payload is not None
         calls.append((method, url, payload))
         return [{"run_id": payload["run_id"]}]
 
@@ -43,6 +44,7 @@ def test_create_related_run_reuses_correlation_id():
     calls = []
 
     def request_json(url, key, *, method="GET", payload=None):
+        assert payload is not None
         calls.append((method, url, payload))
         return [{"run_id": payload["run_id"]}]
 
@@ -115,6 +117,7 @@ def test_finish_requires_exact_confirmed_run_id():
 
     assert result["status"] == "success"
     assert calls[0][0] == "PATCH"
+    assert "&status=eq.running" in calls[0][1]
 
 
 @pytest.mark.parametrize("response", [[], [{"run_id": "wrong"}], [{}, {}]])
@@ -181,6 +184,7 @@ def test_secret_key_receives_apikey_without_bearer():
     ("field_name", "value"),
     [("run_id", "not-a-uuid"), ("correlation_id", "not-a-uuid")],
 )
+
 def test_invalid_uuid_is_a_monitoring_error(field_name, value):
     kwargs = {
         "run_id": "10000000-0000-0000-0000-000000000011",
@@ -197,3 +201,40 @@ def test_invalid_uuid_is_a_monitoring_error(field_name, value):
             mode="read_only",
             **kwargs,
         )
+
+def test_finish_rejects_running_without_request():
+    def request_json(*args, **kwargs):
+        pytest.fail("No request should be made for status running")
+
+    with pytest.raises(monitoring.PipelineMonitoringError):
+        monitoring.finish_pipeline_run(
+            request_json,
+            url="https://example.test",
+            key="secret",
+            run_id="10000000-0000-0000-0000-000000000006",
+            status="running",
+        )
+        
+def test_finish_omits_metrics_and_details_when_not_provided():
+    calls = []
+    run_id = "10000000-0000-0000-0000-000000000006"
+
+    def request_json(url, key, *, method="GET", payload=None):
+        calls.append(payload)
+        return [{"run_id": run_id}]
+
+    monitoring.finish_pipeline_run(
+        request_json,
+        url="https://example.test",
+        key="secret",
+        run_id=run_id,
+        status="success",
+        finished_at=NOW.isoformat(),
+    )
+
+    assert calls == [
+        {
+            "status": "success",
+            "finished_at": NOW.isoformat(),
+        }
+    ]

@@ -1,5 +1,6 @@
 -- Add correlation tracing to public.pipeline_runs.
 -- Stage and mode lists remain explicit shared contracts documented in code.
+-- Apply after 011_create_pipeline_runs.sql.
 
 BEGIN;
 

@@ -336,6 +336,7 @@ Before live ranking, apply the existing topic-storage migrations in order:
 7. `sql/008_create_topic_status_and_posts.sql`
 8. `sql/009_create_source_registry.sql`
 9. `sql/011_create_pipeline_runs.sql`
+10. `sql/012_add_pipeline_run_correlation.sql`
 
 Migration 006 provides the backend `service_role` access needed by the
 adapter: read access to `news`, `topics`, `topic_articles` and the topic read

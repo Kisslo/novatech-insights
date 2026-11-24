@@ -37,14 +37,16 @@ def normalize_uuid(value, *, field_name):
         ) from error
 
 
-def create_run_identity(correlation_id=None):
-    run_id = str(uuid.uuid4())
+def create_run_identity(correlation_id=None, *, run_id=None):
+    normalized_run_id = normalize_uuid(run_id, field_name="run_id")
     normalized_correlation_id = normalize_uuid(
         correlation_id, field_name="correlation_id"
     )
+    if normalized_run_id is None:
+        normalized_run_id = str(uuid.uuid4())
     if normalized_correlation_id is None:
         normalized_correlation_id = str(uuid.uuid4())
-    return run_id, normalized_correlation_id
+    return normalized_run_id, normalized_correlation_id
 
 
 def build_supabase_headers(key, *, method="GET"):
@@ -83,14 +85,9 @@ def create_pipeline_run(
     if mode not in SUPPORTED_MODES:
         raise PipelineMonitoringError(f"Unsupported pipeline mode: {mode}")
 
-    if run_id is None:
-        run_id = str(uuid.uuid4())
-    run_id = normalize_uuid(run_id, field_name="run_id")
-    normalized_correlation_id = normalize_uuid(
-        correlation_id, field_name="correlation_id"
+    run_id, normalized_correlation_id = create_run_identity(
+        correlation_id, run_id=run_id
     )
-    if normalized_correlation_id is None:
-        normalized_correlation_id = str(uuid.uuid4())
     started_at = started_at or utc_now()
 
     payload = {
@@ -144,19 +141,21 @@ def finish_pipeline_run(
     metrics=None,
     details=None,
 ):
-    if status not in SUPPORTED_STATUSES:
+    if status not in SUPPORTED_STATUSES or status == "running":
         raise PipelineMonitoringError(f"Unsupported pipeline status: {status}")
     run_id = normalize_uuid(run_id, field_name="run_id")
     payload = {
         "status": status,
         "finished_at": finished_at or utc_now(),
-        "metrics": metrics if metrics is not None else {},
-        "details": details if details is not None else {},
     }
+    if metrics is not None:
+        payload["metrics"] = metrics
+    if details is not None:
+        payload["details"] = details
 
     try:
         response = request_json(
-            f"{url}/rest/v1/pipeline_runs?run_id=eq.{run_id}&select=run_id",
+            f"{url}/rest/v1/pipeline_runs?run_id=eq.{run_id}&status=eq.running&select=run_id",
             key,
             method="PATCH",
             payload=payload,

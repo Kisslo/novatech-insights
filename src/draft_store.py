@@ -131,6 +131,8 @@ def call_function(name: str, arguments: dict, migration: str = "010") -> list[di
     function refuses. Those texts are turned into PostNotFound and
     PostNotReady, so the endpoint can answer 404 and 409: "Post <id> does
     not exist" and "Post <id> cannot ..." (a draft or publishing refused).
+        A function that returns void (mark_post_published,
+    cancel_publish_request) gets HTTP 204 with an empty body: that is [].
     `migration` is the migration that creates the function, for the error
     message when it is missing.
     """
@@ -143,7 +145,7 @@ def call_function(name: str, arguments: dict, migration: str = "010") -> list[di
     )
     try:
         with urlopen(request, timeout=SUPABASE_TIMEOUT_SECONDS) as response:
-            rows = json.loads(response.read().decode("utf-8"))
+            body = response.read().decode("utf-8")
     except HTTPError as error:
         message = error_message(error)
         if "does not exist" in message and message.startswith("Post "):
@@ -165,8 +167,18 @@ def call_function(name: str, arguments: dict, migration: str = "010") -> list[di
         ) from error
     except (URLError, OSError) as error:
         raise StoreError(f"Could not reach Supabase ({error}).") from error
+
+    if not body.strip():
+        # A function that returns void: PostgREST answers 204 No Content.
+        # The database has already done the work, so this is a success.
+        return []
+    try:
+        rows = json.loads(body)
     except json.JSONDecodeError as error:
         raise StoreError("Supabase did not answer with JSON.") from error
+    if rows is None:
+        # Older PostgREST versions answer 200 with null for void.
+        return []
     if not isinstance(rows, list):
         raise StoreError(f"Unexpected answer from Supabase for '{name}'.")
     return rows

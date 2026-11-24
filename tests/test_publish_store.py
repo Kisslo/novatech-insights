@@ -139,6 +139,9 @@ def fake_supabase(monkeypatch, answers):
         answer = answers[(request.get_method(), table)]
         if isinstance(answer, Exception):
             raise answer
+        if isinstance(answer, bytes):
+            # The raw body, for example b"" for HTTP 204 No Content.
+            return io.BytesIO(answer)
         return io.BytesIO(json.dumps(answer).encode("utf-8"))
 
     monkeypatch.setattr("draft_store.urlopen", call)
@@ -244,3 +247,49 @@ def test_supabase_cancel(supabase_env, monkeypatch):
     requests = fake_supabase(monkeypatch, {("POST", "cancel_publish_request"): []})
     cancel_publish_request("supabase", 7)
     assert body(requests[0]) == {"p_post_id": 7}
+
+
+# PostgREST answers HTTP 204 with an empty body for a function that returns
+# void. The database has already done the work, so it must not become a
+# StoreError (that gave 502 after a successful publish, found when testing
+# migration 013 with PostgREST 12.2.3).
+NO_CONTENT = b""
+
+
+def test_supabase_mark_published_with_empty_answer(supabase_env, monkeypatch):
+    saved = {"id": 7, "status": "published", "wordpress_post_id": 42}
+    fake_supabase(
+        monkeypatch,
+        {("POST", "mark_post_published"): NO_CONTENT, ("GET", "posts"): [saved]},
+    )
+    result = mark_published("supabase", 7, {"draft_id": 55, "version": 3}, WP_POST)
+    assert result == saved
+
+
+def test_supabase_cancel_with_empty_answer(supabase_env, monkeypatch):
+    requests = fake_supabase(
+        monkeypatch, {("POST", "cancel_publish_request"): NO_CONTENT}
+    )
+    cancel_publish_request("supabase", 7)
+    assert body(requests[0]) == {"p_post_id": 7}
+
+
+@pytest.mark.parametrize("answer", [NO_CONTENT, b"  \n", b"null"])
+def test_call_function_treats_void_answer_as_no_rows(supabase_env, monkeypatch, answer):
+    fake_supabase(monkeypatch, {("POST", "cancel_publish_request"): answer})
+    assert draft_store.call_function("cancel_publish_request", {"p_post_id": 7}) == []
+
+
+def test_supabase_request_publish_with_empty_answer_is_an_error(
+    supabase_env, monkeypatch
+):
+    """request_publish must return a row; an empty answer is not a success."""
+    fake_supabase(monkeypatch, {("POST", "request_publish"): NO_CONTENT})
+    with pytest.raises(StoreError, match="Unexpected answer"):
+        request_publish("supabase", 7, 3)
+
+
+def test_call_function_still_refuses_other_non_json(supabase_env, monkeypatch):
+    fake_supabase(monkeypatch, {("POST", "cancel_publish_request"): b"<html>"})
+    with pytest.raises(StoreError, match="did not answer with JSON"):
+        draft_store.call_function("cancel_publish_request", {"p_post_id": 7})

@@ -37,6 +37,11 @@ implementations in the repository; steps 4–8 are planned.
 The system proposes, Kisslo selects, and his choices guide the
 next selection. No predefined keywords.
 
+Ranking execution history is stored in `public.pipeline_runs` for both
+read-only and write runs. Read-only mode records calculations without
+updating topic ranking fields; only a successful write run is considered the
+latest successful ranking.
+
 Three entry points are planned for the selection:
 
 - The system sends the top 5 every morning in Telegram.

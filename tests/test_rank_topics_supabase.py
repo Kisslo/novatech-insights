@@ -1,3 +1,4 @@
+import sys
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
@@ -65,6 +66,12 @@ def paged_request(
     def fake_request(url, key, *, method="GET", payload=None):
         calls.append((method, url, payload))
         table = url.split("/rest/v1/")[1].split("?")[0]
+        if table == "pipeline_runs":
+            query = parse_qs(urlparse(url).query)
+            if method == "POST":
+                assert payload is not None
+                return [{"run_id": payload["run_id"]}]
+            return [{"run_id": query["run_id"][0].removeprefix("eq.")}]
         if method == "PATCH":
             return patch_response if patch_response is not None else [{"id": 1}]
         query = parse_qs(urlparse(url).query)
@@ -93,7 +100,9 @@ def test_read_only_ranks_all_memberships_and_does_not_write(monkeypatch):
         == 1
     )
     assert result["skipped"] == {2: "no valid articles; ranking fields will be cleared"}
-    assert all(method == "GET" for method, _, _ in calls)
+    assert all(
+        "/rest/v1/pipeline_runs" in url or method == "GET" for method, url, _ in calls
+    )
 
 
 def test_normalized_ranking_copy_merges_variants_without_mutating_input(monkeypatch):
@@ -143,6 +152,10 @@ def test_writes_only_four_fields_and_confirms_each_topic(monkeypatch):
     responses = iter([[{"id": 1}], [{"id": 2}]])
 
     def request(url, key, *, method="GET", payload=None):
+        if "/pipeline_runs" in url:
+            return paged_request(rows(), calls)(
+                url, key, method=method, payload=payload
+            )
         if method == "PATCH":
             calls.append((method, url, payload))
             return next(responses)
@@ -153,7 +166,11 @@ def test_writes_only_four_fields_and_confirms_each_topic(monkeypatch):
         url="https://example.test", key="secret", write=True, now=NOW, config=CONFIG
     )
 
-    patches = [payload for method, _, payload in calls if method == "PATCH"]
+    patches = [
+        payload
+        for method, url, payload in calls
+        if method == "PATCH" and "/topics?" in url
+    ]
     assert len(patches) == 2
     assert all(set(payload) == set(adapter.RANKING_FIELDS) for payload in patches)
     assert result["writes"] == {
@@ -184,6 +201,10 @@ def test_first_write_failure_does_not_stop_next_confirmation(monkeypatch):
     responses = iter([[{"id": 999}], [{"id": 2}]])
 
     def request(url, key, *, method="GET", payload=None):
+        if "/pipeline_runs" in url:
+            return paged_request(rows(), calls)(
+                url, key, method=method, payload=payload
+            )
         if method == "PATCH":
             calls.append((method, url, payload))
             return next(responses)
@@ -207,6 +228,10 @@ def test_malformed_write_confirmation_is_an_isolated_failure(monkeypatch):
     responses = iter([[None], [{"id": 2}]])
 
     def request(url, key, *, method="GET", payload=None):
+        if "/pipeline_runs" in url:
+            return paged_request(rows(), calls)(
+                url, key, method=method, payload=payload
+            )
         if method == "PATCH":
             calls.append((method, url, payload))
             return next(responses)
@@ -235,6 +260,8 @@ def test_calculation_error_does_not_block_next_topic_write(monkeypatch):
         return original_rank_topics(topics, *args, **kwargs)
 
     def request(url, key, *, method="GET", payload=None):
+        if "/pipeline_runs" in url:
+            return request_reads(url, key, method=method, payload=payload)
         if method == "PATCH":
             calls.append((method, url, payload))
             return [{"id": 2}]
@@ -258,11 +285,14 @@ def test_missing_article_aborts_before_writing(monkeypatch):
     calls = []
     monkeypatch.setattr(adapter, "request_json", paged_request(data, calls))
 
-    with pytest.raises(adapter.SupabaseReadError):
-        adapter.run_ranking(
-            url="https://example.test", key="secret", write=True, now=NOW, config=CONFIG
-        )
-    assert not any(method == "PATCH" for method, _, _ in calls)
+    result = adapter.run_ranking(
+        url="https://example.test", key="secret", write=True, now=NOW, config=CONFIG
+    )
+    assert result["status"] == "failed"
+    assert result["monitoring_error"] is None
+    assert result["topics"] == []
+    assert result["run_id"]
+    assert not any(method == "PATCH" and "/topics?" in url for method, url, _ in calls)
 
 
 def test_later_page_read_error_aborts_before_writing(monkeypatch):
@@ -273,11 +303,12 @@ def test_later_page_read_error_aborts_before_writing(monkeypatch):
         paged_request(rows(), calls, fail_table="news", fail_offset=1),
     )
 
-    with pytest.raises(adapter.SupabaseReadError):
-        adapter.run_ranking(
-            url="https://example.test", key="secret", write=True, now=NOW, config=CONFIG
-        )
-    assert not any(method == "PATCH" for method, _, _ in calls)
+    result = adapter.run_ranking(
+        url="https://example.test", key="secret", write=True, now=NOW, config=CONFIG
+    )
+    assert result["status"] == "failed"
+    assert "later page failed" in result["details"]["run_error"]
+    assert not any(method == "PATCH" and "/topics?" in url for method, url, _ in calls)
 
 
 def test_null_payload_is_exactly_four_null_fields(monkeypatch):
@@ -290,7 +321,11 @@ def test_null_payload_is_exactly_four_null_fields(monkeypatch):
         url="https://example.test", key="secret", write=True, now=NOW, config=CONFIG
     )
 
-    patches = [payload for method, _, payload in calls if method == "PATCH"]
+    patches = [
+        payload
+        for method, url, payload in calls
+        if method == "PATCH" and "/topics?" in url
+    ]
     assert patches == [
         {field: None for field in adapter.RANKING_FIELDS},
         {field: None for field in adapter.RANKING_FIELDS},
@@ -317,7 +352,7 @@ def test_unexpected_calculation_error_is_not_cleared(monkeypatch):
     assert result["topics"] == []
     assert result["writes"]["confirmed"] == []
     assert "calculation failed" in result["errors"][1]
-    assert not any(method == "PATCH" for method, _, _ in calls)
+    assert not any(method == "PATCH" and "/topics?" in url for method, url, _ in calls)
 
 
 @pytest.mark.parametrize("source_type", ["media", "authority"])
@@ -357,11 +392,12 @@ def test_mismatched_stored_normalization_aborts_before_writing(monkeypatch):
     calls = []
     monkeypatch.setattr(adapter, "request_json", paged_request(data, calls))
 
-    with pytest.raises(adapter.SupabaseReadError, match="normalization"):
-        adapter.run_ranking(
-            url="https://example.test", key="secret", write=True, now=NOW, config=CONFIG
-        )
-    assert not any(method == "PATCH" for method, _, _ in calls)
+    result = adapter.run_ranking(
+        url="https://example.test", key="secret", write=True, now=NOW, config=CONFIG
+    )
+    assert result["status"] == "failed"
+    assert "normalization" in result["details"]["run_error"]
+    assert not any(method == "PATCH" and "/topics?" in url for method, url, _ in calls)
 
 
 def test_missing_registry_match_is_rankable_without_bonus(monkeypatch):
@@ -434,7 +470,233 @@ def test_registry_read_error_is_not_treated_as_unclassified(monkeypatch):
         paged_request(rows(), calls, fail_table="source_registry"),
     )
 
-    with pytest.raises(adapter.SupabaseReadError):
+    result = adapter.run_ranking(
+        url="https://example.test", key="secret", now=NOW, config=CONFIG
+    )
+    assert result["status"] == "failed"
+    assert result["details"]["run_error"]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        (
+            {
+                "mode": "read_only",
+                "topics_total": 2,
+                "calculated": [1, 2],
+                "skipped": {},
+                "calculation_errors": {},
+                "writes_confirmed": [],
+                "writes_failed": [],
+                "run_error": None,
+            },
+            "success",
+        ),
+        (
+            {
+                "mode": "read_only",
+                "topics_total": 2,
+                "calculated": [1],
+                "skipped": {2: "invalid"},
+                "calculation_errors": {},
+                "writes_confirmed": [],
+                "writes_failed": [],
+                "run_error": None,
+            },
+            "partial",
+        ),
+        (
+            {
+                "mode": "write",
+                "topics_total": 2,
+                "calculated": [1],
+                "skipped": {2: "invalid"},
+                "calculation_errors": {},
+                "writes_confirmed": [1],
+                "writes_failed": [2],
+                "run_error": None,
+            },
+            "partial",
+        ),
+        (
+            {
+                "mode": "write",
+                "topics_total": 2,
+                "calculated": [],
+                "skipped": {1: "invalid", 2: "invalid"},
+                "calculation_errors": {},
+                "writes_confirmed": [1, 2],
+                "writes_failed": [],
+                "run_error": None,
+            },
+            "no_data",
+        ),
+        (
+            {
+                "mode": "write",
+                "topics_total": 2,
+                "calculated": [],
+                "skipped": {1: "invalid", 2: "invalid"},
+                "calculation_errors": {},
+                "writes_confirmed": [1],
+                "writes_failed": [2],
+                "run_error": None,
+            },
+            "failed",
+        ),
+    ],
+)
+def test_calculate_run_status(kwargs, expected):
+    assert adapter.calculate_run_status(**kwargs) == expected
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [("read_only", "no_data"), ("write", "no_data")],
+)
+def test_calculate_run_status_with_no_topics(mode, expected):
+    assert (
+        adapter.calculate_run_status(
+            mode=mode,
+            topics_total=0,
+            calculated=[],
+            skipped={},
+            calculation_errors={},
+            writes_confirmed=[],
+            writes_failed=[],
+            run_error=None,
+        )
+        == expected
+    )
+
+
+def test_calculate_run_status_write_success():
+    assert (
+        adapter.calculate_run_status(
+            mode="write",
+            topics_total=2,
+            calculated=[1, 2],
+            skipped={},
+            calculation_errors={},
+            writes_confirmed=[1, 2],
+            writes_failed=[],
+            run_error=None,
+        )
+        == "success"
+    )
+
+
+def test_calculate_run_status_all_ranking_writes_fail_but_cleanup_succeeds():
+    assert (
+        adapter.calculate_run_status(
+            mode="write",
+            topics_total=3,
+            calculated=[1, 2],
+            skipped={3: "no valid articles"},
+            calculation_errors={},
+            writes_confirmed=[3],
+            writes_failed=[1, 2],
+            run_error=None,
+        )
+        == "failed"
+    )
+
+
+@pytest.mark.parametrize("mode", ["read_only", "write"])
+def test_calculate_run_status_all_topics_have_calculation_errors(mode):
+    assert (
+        adapter.calculate_run_status(
+            mode=mode,
+            topics_total=2,
+            calculated=[],
+            skipped={},
+            calculation_errors={"1": "bad", "2": "bad"},
+            writes_confirmed=[],
+            writes_failed=[],
+            run_error=None,
+        )
+        == "failed"
+    )
+
+
+def test_calculate_run_status_warnings_alone_do_not_change_status():
+    assert (
+        adapter.calculate_run_status(
+            mode="read_only",
+            topics_total=1,
+            calculated=[1],
+            skipped={},
+            calculation_errors={},
+            writes_confirmed=[],
+            writes_failed=[],
+            run_error=None,
+            warnings=["normalization warning"],
+        )
+        == "success"
+    )
+
+
+def test_start_monitoring_failure_aborts_before_ranking(monkeypatch):
+    calls = []
+
+    def request(url, key, *, method="GET", payload=None):
+        calls.append((method, url, payload))
+        if method == "POST":
+            raise adapter.SupabaseReadError("monitoring unavailable")
+        return paged_request(rows(), calls)(url, key, method=method, payload=payload)
+
+    monkeypatch.setattr(adapter, "request_json", request)
+
+    with pytest.raises(adapter.PipelineMonitoringError, match="Could not create"):
         adapter.run_ranking(
             url="https://example.test", key="secret", now=NOW, config=CONFIG
         )
+    assert not any(method == "PATCH" and "/topics?" in url for method, url, _ in calls)
+
+
+def test_finish_monitoring_failure_is_separate_from_ranking_result(monkeypatch, capsys):
+    calls = []
+
+    def request(url, key, *, method="GET", payload=None):
+        calls.append((method, url, payload))
+        if "/pipeline_runs" in url and method == "PATCH":
+            raise adapter.SupabaseReadError("monitoring unavailable")
+        return paged_request(rows(), calls)(url, key, method=method, payload=payload)
+
+    monkeypatch.setattr(adapter, "request_json", request)
+    result = adapter.run_ranking(
+        url="https://example.test", key="secret", now=NOW, config=CONFIG
+    )
+
+    assert result["status"] == "partial"
+    assert result["monitoring_error"]
+    assert "Ranking monitoring error" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "run_error",
+    ["Supabase request failed: unavailable", "Ranking configuration is invalid"],
+)
+def test_main_reports_run_error_and_returns_failure(monkeypatch, capsys, run_error):
+    monkeypatch.setenv("SUPABASE_URL", "https://example.test")
+    monkeypatch.setenv("SUPABASE_KEY", "secret")
+    monkeypatch.setattr(
+        adapter,
+        "run_ranking",
+        lambda **kwargs: {
+            "run_id": "run-1",
+            "status": "failed",
+            "details": {"run_error": run_error},
+            "topics": [],
+            "calculated": [],
+            "skipped": {},
+            "warnings": [],
+            "errors": {},
+            "writes": {"confirmed": [], "failed": []},
+            "monitoring_error": None,
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["rank_topics_supabase.py"])
+    assert adapter.main() == 1
+    assert run_error in capsys.readouterr().err

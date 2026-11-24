@@ -738,3 +738,12 @@ curl.exe -X POST -H "X-API-Key: <key>" "http://127.0.0.1:8000/drafts/1?dry_run=t
 A real call takes 30–60 seconds and costs about 0.05 USD; `?dry_run=true`
 costs nothing. With `TELEGRAM_SOURCE=supabase` it needs migration 010
 (`post_drafts` and `save_post_draft`). See [docs/draft-api.md](docs/draft-api.md).
+
+When Kisslo presses Publicera, n8n calls `POST /drafts/{post_id}/publish`
+with the version he read (issue #81). The endpoint checks that it is the
+latest version and has no `[UNVERIFIED]` tags or placeholders, creates the
+post in WordPress (a draft by default, `WORDPRESS_POST_STATUS`) and returns
+the link and the LinkedIn post with the real link. A second call never
+creates a second post. It needs the `WORDPRESS_*` settings in `.env` and,
+with `TELEGRAM_SOURCE=supabase`, migration 013. See
+[Publishing to WordPress](docs/draft-api.md#publishing-to-wordpress).

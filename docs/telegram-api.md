@@ -157,8 +157,9 @@ Stop it (Ctrl+C) when it is not needed.
 
 ## Security
 
-- One endpoint. The automatic docs pages (`/docs`, `/redoc`,
-  `/openapi.json`) are turned off.
+- Two endpoints: this one and `POST /drafts/{post_id}`
+  ([draft-api.md](draft-api.md)), both with the same key check. The
+  automatic docs pages (`/docs`, `/redoc`, `/openapi.json`) are turned off.
 - The key is compared with `secrets.compare_digest`, so it cannot be guessed
   by measuring response times. Without a key in `.env` every request is
   refused (fail closed).

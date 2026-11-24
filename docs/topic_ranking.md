@@ -344,7 +344,7 @@ RLS but still requires these SQL grants. The role and live REST access must be
 verified in the target Supabase project; local SQL permission tests do not
 prove live API access.
 
-Migration 010 grants the backend role access to create and finish ranking
+Migration 011 grants the backend role access to create and finish ranking
 execution-history rows. Run the pipeline-run SQL test after applying it.
 
 Existing articles must first be normalized and verified using the repository's

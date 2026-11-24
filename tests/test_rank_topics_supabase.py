@@ -1,3 +1,4 @@
+import sys
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
@@ -68,6 +69,7 @@ def paged_request(
         if table == "pipeline_runs":
             query = parse_qs(urlparse(url).query)
             if method == "POST":
+                assert payload is not None
                 return [{"run_id": payload["run_id"]}]
             return [{"run_id": query["run_id"][0].removeprefix("eq.")}]
         if method == "PATCH":
@@ -722,6 +724,6 @@ def test_main_reports_run_error_and_returns_failure(monkeypatch, capsys, run_err
             "monitoring_error": None,
         },
     )
-
+    monkeypatch.setattr(sys, "argv", ["rank_topics_supabase.py"])
     assert adapter.main() == 1
     assert run_error in capsys.readouterr().err

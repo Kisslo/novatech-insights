@@ -37,6 +37,23 @@ implementations in the repository; steps 4–8 are planned.
 The system proposes, Kisslo selects, and his choices guide the
 next selection. No predefined keywords.
 
+Ranking execution history is stored in `public.pipeline_runs` for both
+read-only and write runs. Read-only mode records calculations without
+updating topic ranking fields; only a successful write run is considered the
+latest successful ranking.
+
+The shared monitoring contract separates `run_id` (one execution) from
+`correlation_id` (a related chain). A standalone run creates both IDs with
+separate `uuid4()` calls. A caller passing an existing correlation ID reuses
+it across related stage runs, while every run creates a new `run_id`. The IDs
+are allowed to have the same value. Shared stage names are `collection`,
+`upload`, `grouping`, `ranking`, `labeling`, `draft_generation`, and `telegram`.
+
+Modes remain `read_only` or `write`. `read_only` forbids no monitoring-history
+writes and only means that this stage does not write its own calculation/result
+output as usual. `write` means that the stage's result is saved or sent to its
+intended target; it is not limited to database writes.
+
 Three entry points are planned for the selection:
 
 - The system sends the top 5 every morning in Telegram.
@@ -715,3 +732,21 @@ Requests need the header `X-API-Key` with `TELEGRAM_API_KEY` from `.env`.
 `TELEGRAM_SOURCE` chooses `fixture` (default) or `supabase`.
 See [docs/telegram-api.md](docs/telegram-api.md) for the response format,
 errors, the tunnel used during development and the n8n settings.
+
+
+## Article Drafts
+
+`POST /drafts/{post_id}` in the same API writes a Swedish article draft and
+a LinkedIn post for a post where Kisslo has given his angle (issue #30).
+It makes two Claude calls: one writes, one removes AI-sounding phrasing.
+Both get Kisslo's style guide. The draft is saved as a new version and the
+post gets status `draft_generated`. The code is in `src/draft_api.py`,
+`src/draft_article.py` and `src/draft_store.py`.
+
+```powershell
+curl.exe -X POST -H "X-API-Key: <key>" "http://127.0.0.1:8000/drafts/1?dry_run=true"
+```
+
+A real call takes 30–60 seconds and costs about 0.05 USD; `?dry_run=true`
+costs nothing. With `TELEGRAM_SOURCE=supabase` it needs migration 010
+(`post_drafts` and `save_post_draft`). See [docs/draft-api.md](docs/draft-api.md).

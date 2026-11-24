@@ -1,12 +1,14 @@
 """Small API for n8n: the top N topics as ready Telegram messages (issue #42).
 
-One endpoint:
-    GET /telegram/top?n=5   with header X-API-Key: <TELEGRAM_API_KEY>
+Endpoints, both with header X-API-Key: <TELEGRAM_API_KEY>:
+    GET /telegram/top?n=5     this file
+    POST /drafts/{post_id}    draft_api.py (issue #30), added to the app below
 
-The API only reads. It never calls Claude and never writes to Supabase:
-labels are made in advance with `label_topics.py --source supabase --save`.
-The text and buttons come from telegram_format.format_topic(); this file is
-only a thin HTTP wrapper around it.
+GET /telegram/top only reads. It never calls Claude and never writes to
+Supabase: labels are made in advance with
+`label_topics.py --source supabase --save`. The text and buttons come from
+telegram_format.format_topic(); this file is only a thin HTTP wrapper
+around it.
 
 Settings in .env:
     TELEGRAM_API_KEY  long random key that n8n sends in X-API-Key (required)
@@ -24,6 +26,7 @@ import secrets
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
+from draft_api import router as draft_router
 from label_topics import (
     DEFAULT_FIXTURE,
     ReadError,
@@ -66,6 +69,11 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
         x_api_key.encode("utf-8"), expected.encode("utf-8")
     ):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+# POST /drafts/{post_id} lives in draft_api.py (issue #30). It gets the same
+# API key check as /telegram/top.
+app.include_router(draft_router, dependencies=[Depends(require_api_key)])
 
 
 def check_message(topic: dict) -> None:

@@ -286,3 +286,41 @@ def test_create_post_tells_if_post_surely_not_created(monkeypatch, error, not_cr
     with pytest.raises(WordPressError) as raised:
         create_post(SETTINGS, {})
     assert raised.value.not_created is not_created
+
+
+
+
+def test_numbered_lines_become_an_ordered_list():
+    """Found in the integration test: Novatechs rekommendationer is numbered."""
+    body = "\n".join(
+        [
+            "Vi rekommenderar följande:",
+            "",
+            "1. **Utse en ansvarig.** Skriv ned vem.",
+            "2. **Börja smått.** Utkast passar bra.",
+            "10) Den tionde.",
+            "",
+            "Efter listan.",
+        ]
+    )
+    assert article_to_html(body) == "\n".join(
+        [
+            "<p>Vi rekommenderar följande:</p>",
+            "<ol>",
+            "<li><strong>Utse en ansvarig.</strong> Skriv ned vem.</li>",
+            "<li><strong>Börja smått.</strong> Utkast passar bra.</li>",
+            "<li>Den tionde.</li>",
+            "</ol>",
+            "<p>Efter listan.</p>",
+        ]
+    )
+
+
+def test_list_type_change_starts_a_new_list():
+    html = article_to_html("- en punkt\n1. ett nummer")
+    assert html == "<ul>\n<li>en punkt</li>\n</ul>\n<ol>\n<li>ett nummer</li>\n</ol>"
+
+
+def test_year_at_start_of_line_is_not_a_list_item():
+    assert article_to_html("2026. Ett år.") == "<p>2026. Ett år.</p>"
+    

@@ -51,6 +51,8 @@ INLINE_LINK_PATTERN = re.compile(
     r"\[([^\]\n]+)\]\((https?://[^\s<>\"'()]+)\)|(https?://[^\s<>\"'\[\]()]+)"
 )
 BOLD_PATTERN = re.compile(r"\*\*(.+?)\*\*")
+# "1. text" or "1) text": an item in a numbered list.
+NUMBERED_ITEM_PATTERN = re.compile(r"\d{1,2}[.)] ")
 TRAILING_PUNCTUATION = ".,;:!?"
 
 
@@ -203,23 +205,34 @@ def article_to_html(body: str) -> str:
     """The article body (without the headline) as WordPress HTML.
 
     "## " and "### " become <h2> and <h3>, lines starting with "- " or "* "
-    become a list, and other lines become paragraphs (lines in the same
+    become a bulleted list, lines starting with "1. " (any number) become a
+    numbered list, and other lines become paragraphs (lines in the same
     paragraph are joined). A blank line ends a paragraph or a list.
     """
     html, paragraph, items = [], [], []
+    list_tag = ""  # "ul" or "ol" while items are collected
 
     def flush() -> None:
+        nonlocal list_tag
         if paragraph:
             html.append(f"<p>{' '.join(paragraph)}</p>")
             paragraph.clear()
         if items:
-            html.append(
-                "<ul>\n" + "\n".join(f"<li>{i}</li>" for i in items) + "\n</ul>"
-            )
+            rows = "\n".join(f"<li>{item}</li>" for item in items)
+            html.append(f"<{list_tag}>\n{rows}\n</{list_tag}>")
             items.clear()
+        list_tag = ""
+
+    def add_item(tag: str, text: str) -> None:
+        nonlocal list_tag
+        if paragraph or (items and list_tag != tag):
+            flush()
+        list_tag = tag
+        items.append(inline_html(text.strip()))
 
     for raw in body.splitlines():
         line = raw.strip()
+        numbered = NUMBERED_ITEM_PATTERN.match(line)
         if not line:
             flush()
         elif line.startswith("### "):
@@ -229,9 +242,9 @@ def article_to_html(body: str) -> str:
             flush()
             html.append(f"<h2>{inline_html(line[3:].strip())}</h2>")
         elif line.startswith(("- ", "* ")):
-            if paragraph:
-                flush()
-            items.append(inline_html(line[2:].strip()))
+            add_item("ul", line[2:])
+        elif numbered:
+            add_item("ol", line[numbered.end() :])
         else:
             if items:
                 flush()

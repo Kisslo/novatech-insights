@@ -288,8 +288,6 @@ def test_create_post_tells_if_post_surely_not_created(monkeypatch, error, not_cr
     assert raised.value.not_created is not_created
 
 
-
-
 def test_numbered_lines_become_an_ordered_list():
     """Found in the integration test: Novatechs rekommendationer is numbered."""
     body = "\n".join(
@@ -323,4 +321,3 @@ def test_list_type_change_starts_a_new_list():
 
 def test_year_at_start_of_line_is_not_a_list_item():
     assert article_to_html("2026. Ett år.") == "<p>2026. Ett år.</p>"
-    

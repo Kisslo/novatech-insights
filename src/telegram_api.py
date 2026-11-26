@@ -4,6 +4,8 @@ Endpoints, all with header X-API-Key: <TELEGRAM_API_KEY>:
     GET /telegram/top?n=5     this file
     POST /drafts/{post_id}    draft_api.py (issue #30), added to the app below
     POST /drafts/{post_id}/publish   publish_api.py (issue #81), added below
+    POST /drafts/{post_id}/revise    revise_api.py (issue #67), added below
+    POST /drafts/{post_id}/keep      revise_api.py (issue #67), added below
 
 GET /telegram/top only reads. It never calls Claude and never writes to
 Supabase: labels are made in advance with
@@ -37,6 +39,7 @@ from label_topics import (
     select_top,
 )
 from publish_api import router as publish_router
+from revise_api import router as revise_router
 from telegram_format import format_topic
 
 load_dotenv()
@@ -78,6 +81,8 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
 app.include_router(draft_router, dependencies=[Depends(require_api_key)])
 # POST /drafts/{post_id}/publish lives in publish_api.py (issue #81).
 app.include_router(publish_router, dependencies=[Depends(require_api_key)])
+# POST /drafts/{post_id}/revise and /keep live in revise_api.py (issue #67).
+app.include_router(revise_router, dependencies=[Depends(require_api_key)])
 
 
 def check_message(topic: dict) -> None:

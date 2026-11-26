@@ -114,13 +114,19 @@ class DraftRequest(BaseModel):
 # -------------------- helpers
 
 
-def estimate_draft_cost(model: str, prompt: str, article_chars: int = 6000) -> dict:
+def estimate_draft_cost(
+    model: str,
+    prompt: str,
+    article_chars: int = 6000,
+    system_prompt: str = SYSTEM_PROMPT,
+) -> dict:
     """Rough highest cost of both calls: ~4 characters per token, all output used.
 
     The review prompt does not exist before call 1, so its input is estimated
     from a typical article length. Cost is None if the model's price is unknown.
+    `system_prompt` is the one for call 1 (another one for /revise, #67).
     """
-    write_in = (len(SYSTEM_PROMPT) + len(prompt)) // 4
+    write_in = (len(system_prompt) + len(prompt)) // 4
     review_prompt = build_review_prompt("", "")
     review_in = (len(REVIEW_SYSTEM_PROMPT) + len(review_prompt) + article_chars) // 4
     write_cost = estimate_cost(model, write_in, MAX_OUTPUT_TOKENS)

@@ -439,7 +439,6 @@ writes to Supabase itself (decided with Turker, 25 Nov). Both work only on
 the **latest** draft. Ändra needs `draft_generated`; Skippa also works in
 `changes_requested`. They need migration 014
 (`sql/014_keep_and_change_drafts.sql`, PR #84) and 015 (Nosheen).
-(`sql/014_keep_and_change_drafts.sql`, PR #84, Nosheen).
 
 ### Skippa: `POST /drafts/{post_id}/keep`
 

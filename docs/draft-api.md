@@ -180,8 +180,8 @@ returns the messages; n8n sends them and handles the presses.
 | Button | `callback_data` | What happens | Status |
 |---|---|---|---|
 | Publicera | `publish:<post_id>:<version>` | This version is sent to WordPress | `POST /drafts/{post_id}/publish`, see [Publishing to WordPress](#publishing-to-wordpress) (#81) |
-| Ändra | `revise:<post_id>:<version>` | Kisslo writes what he wants changed, and a new version is made from this one and his text | #67 |
-| Skippa | `keep:<post_id>:<version>` | The draft is kept in `post_drafts` (it is already paid for); nothing more happens | Status value in a follow-up migration (proposal `draft_kept`) |
+| Ändra | `revise:<post_id>:<version>` | Kisslo writes what he wants changed, and a new version is made from this one and his text | `POST /drafts/{post_id}/revise`, see [Ändra and Skippa](#ändra-and-skippa) (#67) |
+| Skippa | `keep:<post_id>:<version>` | The draft is kept in `post_drafts` (it is already paid for); nothing more happens | `POST /drafts/{post_id}/keep`, see [Ändra and Skippa](#ändra-and-skippa) (#67) |
 
 The version is part of `callback_data`, so a press always applies to the
 exact version Kisslo read, also if a newer version exists. The prefixes
@@ -431,9 +431,115 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/drafts/1/publish" -He
 - On 409 or 502: show `detail` to Kisslo. After 502 "did not create the
   post" a new press is safe; after any other 502, check WordPress first.
 
+## Ändra and Skippa
+
+Two endpoints for the other two buttons (issue #67), in
+`src/revise_api.py` and `src/revise_store.py`. n8n calls them; it never
+writes to Supabase itself (decided with Turker, 25 Nov). Both work only on
+the **latest** draft. Ändra needs `draft_generated`; Skippa also works in
+`changes_requested`. They need migration 014
+(`sql/014_keep_and_change_drafts.sql`, PR #84) and 015 (Nosheen).
+
+### Skippa: `POST /drafts/{post_id}/keep`
+
+```http
+POST /drafts/{post_id}/keep
+X-API-Key: <TELEGRAM_API_KEY>
+Content-Type: application/json
+
+{"version": 3}
+```
+
+`keep_draft` sets the status `draft_kept`. The draft stays in
+`post_drafts`; nothing is published, and the post cannot be revised or
+published afterwards. It works from `draft_generated` and, after a failed
+Ändra, from `changes_requested` (migration 015), so Kisslo can always skip.
+The answer has `status`, `version`, `draft_id` and one Telegram message in
+`messages`: "Utkastet är sparat (v3)".
+
+### Ändra: `POST /drafts/{post_id}/revise`
+
+```http
+POST /drafts/{post_id}/revise
+X-API-Key: <TELEGRAM_API_KEY>
+Content-Type: application/json
+
+{"version": 3, "change_request": "Gör ingressen kortare och nämn föreningar."}
+```
+
+| Part | Required | Meaning |
+|---|---|---|
+| body `version` | yes | The version in `revise:<post_id>:<version>`, the one Kisslo read |
+| body `change_request` | yes | Kisslo's text, at most 2,000 characters, not empty. Other fields are refused (422) |
+| `?dry_run=true` | no | Run all checks and return the prompt and an estimate. Nothing is called or saved |
+
+What one call does:
+
+1. **Checks** (no cost): the post exists, its status is `draft_generated`
+   (or `changes_requested`, see below), the version is the latest draft, and
+   the sources of that version are still in the topic.
+2. **Saves the change request** on that version and sets
+   `changes_requested` (`request_draft_changes`).
+3. **Call 1** gets the previous article and LinkedIn post, Kisslo's change
+   request, his angle and the same sources, and changes only what he asked
+   for. It does not write from scratch. Only the sources of the previous
+   version are used (`source_news_ids`), and its stance is kept. A fact the
+   sources do not support, also one Kisslo asks for, gets `[UNVERIFIED]`.
+4. **Call 2** is the same review as for a new draft, with the same guard.
+5. **Saves the next version** with `save_post_draft` (status
+   `draft_generated`). The change request is also added at the end of the
+   reviewer notes ("Change request (on version 3)").
+6. **Returns** the same fields and `messages` as `POST /drafts`, plus
+   `based_on_version`. The buttons have the new version, for example
+   `publish:7:4`, `revise:7:4`, `keep:7:4`.
+
+**If Claude or the save fails after step 2**, the post stays in
+`changes_requested` (decided for #67). Nothing else is saved, and the old
+buttons still name the latest version. A new press on Ändra for the same
+version skips step 2 and writes the version with the change request of the
+new call. Skippa also works then (015). Publicera gives 409 until a new
+version exists, since a version Kisslo asked to change should not be
+published. A second `/revise` while one is running gives 409, also against
+`POST /drafts` for the same post.
+
+Time and cost are about the same as for a new draft. The prompt is a little
+longer, since the previous texts are in it.
+
+### Errors
+
+| Code | When |
+|---|---|
+| 401 | Wrong or missing `X-API-Key` |
+| 404 | No such post |
+| 409 | Wrong status (for example `draft_kept` or `published`), an old version, no draft, the sources are gone, or a draft is already being written |
+| 422 | Invalid body: missing `version`, empty or too long `change_request`, unknown field |
+| 500 | `TELEGRAM_SOURCE` is invalid |
+| 502 | Supabase or Claude failed. Safe to try again |
+
+| The function says (014) | The endpoint answers |
+|---|---|
+| `Post <id> does not exist` | 404 |
+| `Post <id> cannot be kept …` / `cannot receive changes …` | 409 |
+| Function not found (014 not run) | 502 |
+
+With the fixture source, the status after a press is saved in
+`output/published/post_<id>.json`, the same file the publishing reads, so a
+kept fixture post cannot be published either.
+
+### Settings in n8n
+
+- On `revise:<post_id>:<version>`: ask "Vad vill du ändra?", wait for
+  Kisslo's next text, then `POST .../drafts/{{ $json.post_id }}/revise`
+  with body `{"version": {{ $json.version }}, "change_request": "<text>"}`,
+  the same headers as for `/drafts`, timeout at least 120 seconds. On 200,
+  send `messages` in order, as for a new draft.
+- On `keep:<post_id>:<version>`: `POST .../drafts/{{ $json.post_id }}/keep`
+  with body `{"version": {{ $json.version }}}`, timeout 30 seconds, and send
+  the message.
+- On 409 or 502: show `detail` to Kisslo.
+
 ## Out of scope
 
-Handling the button presses (n8n), revising a draft
-from Kisslo's change request (#67), searching for more supporting articles or
+Handling the button presses (n8n), searching for more supporting articles or
 research, pasted links or text, counterpoints in the top 5 (#55) and the
 source check with a separate model (#33).

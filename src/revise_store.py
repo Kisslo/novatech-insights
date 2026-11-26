@@ -10,10 +10,12 @@ Used by the endpoints in revise_api.py:
         ... revise_draft() in draft_article.py ...
         save_revision(source, post, row)
 
-Both buttons only work on the latest draft of a post in draft_generated.
-keep sets draft_kept; nothing is published and the draft stays. Ändra saves
-the change request on the version Kisslo read and sets changes_requested;
-save_post_draft then accepts the next version and sets draft_generated.
+Both buttons only work on the latest draft. Ändra needs draft_generated;
+Skippa also works in changes_requested (migration 015), so Kisslo can skip
+a post after a failed Ändra. keep sets draft_kept; nothing is published and
+the draft stays. Ändra saves the change request on the version Kisslo read
+and sets changes_requested; save_post_draft then accepts the next version
+and sets draft_generated.
 
 If writing the new version fails after request_changes, the post stays in
 changes_requested. A new /revise for the same version then skips
@@ -25,7 +27,8 @@ Two sources, the same as TELEGRAM_SOURCE:
               publish_store.py reads, so a kept fixture post cannot be
               published either. The fixture posts file is never changed.
     supabase  the posts and post_drafts tables, and the database functions
-              keep_draft and request_draft_changes (migration 014, Nosheen).
+              keep_draft (014, changed in 015) and request_draft_changes
+              (014), both by Nosheen.
 """
 
 import json
@@ -55,7 +58,10 @@ CHANGES_FUNCTION = "request_draft_changes"
 
 KEPT_STATUS = "draft_kept"
 CHANGES_STATUS = "changes_requested"
-BUTTONS_FROM = DRAFT_STATUS  # both buttons need a draft that waits for Kisslo
+CHANGES_FROM = (DRAFT_STATUS,)  # Ändra needs a draft that waits for Kisslo
+# Skippa also works after a failed Ändra (migration 015, Nosheen), so Kisslo
+# can always skip. Publicera still needs draft_generated.
+KEEP_FROM = (DRAFT_STATUS, CHANGES_STATUS)
 
 REVISION_FIELDS = (
     "id,version,article_text,linkedin_text,stance,source_news_ids,change_request"
@@ -137,13 +143,16 @@ def topic_with_sources(topic: dict, news_ids: list[int]) -> dict:
 # -------------------- fixture checks
 
 
-def check_fixture_button(post_id: int, version: int, action: str) -> None:
-    """The same checks as keep_draft and request_draft_changes in 014.
+def check_fixture_button(
+    post_id: int, version: int, action: str, allowed: tuple[str, ...]
+) -> None:
+    """The same checks as keep_draft (015) and request_draft_changes (014).
 
-    The messages follow 014, so fixture and supabase give the same answers.
+    The messages follow the migrations, so fixture and supabase give the
+    same answers.
     """
     status = load_publication("fixture", post_id)["status"]
-    if status != BUTTONS_FROM:
+    if status not in allowed:
         raise PostNotReady(f"Post {post_id} cannot {action} in status {status}")
     versions = fixture_versions(post_id)
     if not versions or version != max(versions):
@@ -165,8 +174,9 @@ def function_answer(rows: list[dict], name: str, post_id: int) -> dict:
 def keep(source: str, post_id: int, version: int) -> dict:
     """Skippa: set draft_kept. Returns {"draft_id", "version"} of the kept draft.
 
-    Raises PostNotFound, or PostNotReady if the status is not
-    draft_generated or the version is not the latest draft.
+    Works from draft_generated and, after a failed Ändra, changes_requested
+    (migration 015). Raises PostNotFound, or PostNotReady for another status
+    or if the version is not the latest draft.
     """
     check_source(source)
     if source == "supabase":
@@ -178,7 +188,7 @@ def keep(source: str, post_id: int, version: int) -> dict:
         return function_answer(rows, KEEP_FUNCTION, post_id)
 
     load_post(source, post_id)  # PostNotFound
-    check_fixture_button(post_id, version, "be kept")
+    check_fixture_button(post_id, version, "be kept", KEEP_FROM)
     write_published_file(
         post_id, {"status": KEPT_STATUS, "kept_version": version, "kept_at": now()}
     )
@@ -211,7 +221,7 @@ def request_changes(
         return function_answer(rows, CHANGES_FUNCTION, post_id)
 
     load_post(source, post_id)  # PostNotFound
-    check_fixture_button(post_id, version, "receive changes")
+    check_fixture_button(post_id, version, "receive changes", CHANGES_FROM)
     if not change_request.strip():
         raise PostNotReady(
             f"Post {post_id} cannot receive changes: the change request is empty"

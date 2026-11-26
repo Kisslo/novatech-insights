@@ -123,6 +123,25 @@ def test_fixture_keep_old_version_is_refused():
         keep("fixture", 1, 1)
 
 
+def test_fixture_keep_after_failed_change_is_allowed():
+    # Ändra was pressed but no new version was saved (Claude failed): Skippa
+    # still works (migration 015), Publicera does not.
+    save_fixture_draft(1, 1)
+    request_changes("fixture", 1, 1, "Kortare.")
+    with pytest.raises(PostNotReady, match="cannot be published in status"):
+        request_publish("fixture", 1, 1)
+    assert keep("fixture", 1, 1)["version"] == 1
+    assert load_post_state("fixture", 1)["status"] == "draft_kept"
+
+
+def test_fixture_keep_after_failed_change_old_version_is_refused():
+    save_fixture_draft(1, 1)
+    save_fixture_draft(1, 2)
+    request_changes("fixture", 1, 2, "Kortare.")
+    with pytest.raises(PostNotReady, match="version 1 is not the latest"):
+        keep("fixture", 1, 1)
+
+
 def test_fixture_keep_unknown_post():
     with pytest.raises(PostNotFound):
         keep("fixture", 999, 1)

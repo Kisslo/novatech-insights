@@ -332,6 +332,20 @@ def test_claude_failure_leaves_changes_requested_and_a_retry_works(
     assert state(tmp_path)["status"] == "draft_generated"
 
 
+def test_keep_after_failed_revise_works(monkeypatch, tmp_path, claude):
+    save_draft()
+
+    def failing(*args):
+        raise ClaudeError("Claude is overloaded")
+
+    monkeypatch.setattr(revise_api, "call_claude", failing)
+    assert post_revise().status_code == 502
+    assert state(tmp_path)["status"] == "changes_requested"
+    response = post_keep()
+    assert response.status_code == 200
+    assert response.json()["status"] == "draft_kept"
+
+
 def test_save_failure_gives_502_without_details(claude, monkeypatch):
     save_draft()
 

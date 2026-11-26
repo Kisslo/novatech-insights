@@ -436,7 +436,9 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/drafts/1/publish" -He
 Two endpoints for the other two buttons (issue #67), in
 `src/revise_api.py` and `src/revise_store.py`. n8n calls them; it never
 writes to Supabase itself (decided with Turker, 25 Nov). Both work only on
-the **latest** draft of a post in `draft_generated`, and need migration 014
+the **latest** draft. Ändra needs `draft_generated`; Skippa also works in
+`changes_requested`. They need migration 014
+(`sql/014_keep_and_change_drafts.sql`, PR #84) and 015 (Nosheen).
 (`sql/014_keep_and_change_drafts.sql`, PR #84, Nosheen).
 
 ### Skippa: `POST /drafts/{post_id}/keep`
@@ -451,8 +453,10 @@ Content-Type: application/json
 
 `keep_draft` sets the status `draft_kept`. The draft stays in
 `post_drafts`; nothing is published, and the post cannot be revised or
-published afterwards. The answer has `status`, `version`, `draft_id` and one
-Telegram message in `messages`: "Utkastet är sparat (v3)".
+published afterwards. It works from `draft_generated` and, after a failed
+Ändra, from `changes_requested` (migration 015), so Kisslo can always skip.
+The answer has `status`, `version`, `draft_id` and one Telegram message in
+`messages`: "Utkastet är sparat (v3)".
 
 ### Ändra: `POST /drafts/{post_id}/revise`
 
@@ -494,7 +498,9 @@ What one call does:
 `changes_requested` (decided for #67). Nothing else is saved, and the old
 buttons still name the latest version. A new press on Ändra for the same
 version skips step 2 and writes the version with the change request of the
-new call. A second `/revise` while one is running gives 409, also against
+new call. Skippa also works then (015). Publicera gives 409 until a new
+version exists, since a version Kisslo asked to change should not be
+published. A second `/revise` while one is running gives 409, also against
 `POST /drafts` for the same post.
 
 Time and cost are about the same as for a new draft. The prompt is a little

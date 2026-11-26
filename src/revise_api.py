@@ -33,6 +33,10 @@ reviewer notes of the new version, so each version shows what it answers.
 
 What /keep does: keep_draft sets draft_kept. The draft stays in
 post_drafts and nothing is published. Returns a short Telegram message.
+It also works in changes_requested (migration 015), so Kisslo can skip a
+post after a failed Ändra. Publicera still needs draft_generated.
+It also works in changes_requested (migration 015), so Kisslo can skip a
+post after a failed Ändra. Publicera still needs draft_generated.
 
 Answers:
     200  done (or dry run)

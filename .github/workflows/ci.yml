@@ -316,3 +316,20 @@ jobs:
               psql -X -U postgres -d "$test_database" \
               -v ON_ERROR_STOP=1 < sql/test_publish_workflow.sql
           done
+
+      - name: Test keep and change requests
+        env:
+          TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          for test_database in novatech_test novatech_permissions_test
+          do
+            echo "Applying keep and change requests to $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/014_keep_and_change_drafts.sql
+
+            echo "Testing keep and change requests in $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/test_keep_and_change_drafts.sql
+          done

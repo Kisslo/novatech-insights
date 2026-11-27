@@ -42,6 +42,18 @@ read-only and write runs. Read-only mode records calculations without
 updating topic ranking fields; only a successful write run is considered the
 latest successful ranking.
 
+The shared monitoring contract separates `run_id` (one execution) from
+`correlation_id` (a related chain). A standalone run creates both IDs with
+separate `uuid4()` calls. A caller passing an existing correlation ID reuses
+it across related stage runs, while every run creates a new `run_id`. The IDs
+are allowed to have the same value. Shared stage names are `collection`,
+`upload`, `grouping`, `ranking`, `labeling`, `draft_generation`, and `telegram`.
+
+Modes remain `read_only` or `write`. `read_only` forbids no monitoring-history
+writes and only means that this stage does not write its own calculation/result
+output as usual. `write` means that the stage's result is saved or sent to its
+intended target; it is not limited to database writes.
+
 Three entry points are planned for the selection:
 
 - The system sends the top 5 every morning in Telegram.

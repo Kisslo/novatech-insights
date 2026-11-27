@@ -4,19 +4,30 @@ import argparse
 import json
 import os
 import sys
-import uuid
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
 from dotenv import load_dotenv
 
 if __package__:
+    from .pipeline_monitoring import (
+        PipelineMonitoringError,
+        build_supabase_request,
+        create_pipeline_run,
+        finish_pipeline_run,
+    )
     from .rank_topics import rank_topics
     from .ranking_config import load_ranking_config, validate_ranking_config
     from .source_normalization import normalize_source
 else:
+    from pipeline_monitoring import (
+        PipelineMonitoringError,
+        build_supabase_request,
+        create_pipeline_run,
+        finish_pipeline_run,
+    )
     from rank_topics import rank_topics
     from ranking_config import load_ranking_config, validate_ranking_config
     from source_normalization import normalize_source
@@ -35,20 +46,8 @@ class SupabaseReadError(RuntimeError):
     """Raised when the complete ranking input cannot be read."""
 
 
-class PipelineMonitoringError(RuntimeError):
-    """Raised when a ranking run cannot be recorded at startup."""
-
-
 def request_json(url, key, *, method="GET", payload=None):
-    headers = {"apikey": key, "Content-Type": "application/json"}
-    if method in {"POST", "PATCH"}:
-        headers["Prefer"] = "return=representation"
-    request = Request(
-        url,
-        headers=headers,
-        method=method,
-        data=None if payload is None else json.dumps(payload).encode("utf-8"),
-    )
+    request = build_supabase_request(url, key, method=method, payload=payload)
     try:
         with urlopen(request, timeout=60) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -188,75 +187,6 @@ def update_topic(url, key, topic_id, values):
         raise RuntimeError(f"Supabase did not confirm the update for topic {topic_id}.")
 
 
-def create_pipeline_run(url, key, run_id, started_at, mode):
-    payload = {
-        "run_id": run_id,
-        "stage": "ranking",
-        "mode": mode,
-        "status": "running",
-        "started_at": started_at,
-        "finished_at": None,
-        "metrics": {
-            "topics_total": None,
-            "topics_calculated": 0,
-            "topics_skipped": 0,
-            "calculation_errors": 0,
-            "writes_confirmed": 0,
-            "writes_failed": 0,
-            "warning_count": 0,
-        },
-        "details": {
-            "calculation_errors": {},
-            "write_errors": {},
-            "skipped": {},
-            "warnings": [],
-            "run_error": None,
-            "monitoring_error": None,
-        },
-    }
-    try:
-        response = request_json(
-            f"{url}/rest/v1/pipeline_runs", key, method="POST", payload=payload
-        )
-    except SupabaseReadError as error:
-        raise PipelineMonitoringError(
-            f"Could not create ranking run {run_id}: {error}"
-        ) from error
-    if (
-        not isinstance(response, list)
-        or len(response) != 1
-        or not isinstance(response[0], dict)
-        or response[0].get("run_id") != run_id
-    ):
-        raise PipelineMonitoringError(
-            f"Supabase did not confirm creation of ranking run {run_id}."
-        )
-
-
-def update_pipeline_run(url, key, run_id, values):
-    query = urlencode({"run_id": f"eq.{run_id}", "select": "run_id"})
-    try:
-        response = request_json(
-            f"{url}/rest/v1/pipeline_runs?{query}",
-            key,
-            method="PATCH",
-            payload=values,
-        )
-    except SupabaseReadError as error:
-        raise PipelineMonitoringError(
-            f"Could not finish ranking run {run_id}: {error}"
-        ) from error
-    if (
-        not isinstance(response, list)
-        or len(response) != 1
-        or not isinstance(response[0], dict)
-        or response[0].get("run_id") != run_id
-    ):
-        raise PipelineMonitoringError(
-            f"Supabase did not confirm completion of ranking run {run_id}."
-        )
-
-
 def calculate_run_status(
     *,
     mode,
@@ -331,15 +261,38 @@ def build_pipeline_values(
     }
 
 
-def run_ranking(*, url, key, write=False, now=None, config=None):
+def run_ranking(*, url, key, write=False, now=None, config=None, correlation_id=None):
     if not url or not key:
         raise ValueError("SUPABASE_URL and SUPABASE_KEY are required.")
     url = url.rstrip("/")
     run_now = now or datetime.now(timezone.utc)
-    run_id = str(uuid.uuid4())
-    started_at = datetime.now(timezone.utc).isoformat()
     mode = "write" if write else "read_only"
-    create_pipeline_run(url, key, run_id, started_at, mode)
+    run_identity = create_pipeline_run(
+        request_json,
+        url=url,
+        key=key,
+        stage="ranking",
+        mode=mode,
+        correlation_id=correlation_id,
+        metrics={
+            "topics_total": None,
+            "topics_calculated": 0,
+            "topics_skipped": 0,
+            "calculation_errors": 0,
+            "writes_confirmed": 0,
+            "writes_failed": 0,
+            "warning_count": 0,
+        },
+        details={
+            "calculation_errors": {},
+            "write_errors": {},
+            "skipped": {},
+            "warnings": [],
+            "run_error": None,
+            "monitoring_error": None,
+        },
+    )
+    run_id = run_identity["run_id"]
 
     results = []
     errors = {}
@@ -420,6 +373,7 @@ def run_ranking(*, url, key, write=False, now=None, config=None):
     )
     result = {
         "run_id": run_id,
+        "correlation_id": run_identity["correlation_id"],
         "status": status,
         "details": {
             "calculation_errors": calculation_errors,
@@ -450,7 +404,17 @@ def run_ranking(*, url, key, write=False, now=None, config=None):
         run_error=run_error,
     )
     try:
-        update_pipeline_run(url, key, run_id, pipeline_values)
+        finish_pipeline_run(
+            request_json,
+            url=url,
+            key=key,
+            run_id=run_id,
+            stage="ranking",
+            status=pipeline_values["status"],
+            finished_at=pipeline_values["finished_at"],
+            metrics=pipeline_values["metrics"],
+            details=pipeline_values["details"],
+        )
     except PipelineMonitoringError as error:
         result["monitoring_error"] = str(error)
         print(f"Ranking monitoring error: {error}", file=sys.stderr)

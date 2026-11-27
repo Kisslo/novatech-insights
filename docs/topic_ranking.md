@@ -303,6 +303,19 @@ Read-only mode records the ranking run but never updates topic ranking
 fields. A successful write-mode run is the only mode counted as the latest
 successful ranking.
 
+For shared monitoring, `run_id` identifies one execution and
+`correlation_id` identifies a related chain. A standalone run creates both
+values with separate `uuid4()` calls. A caller passing an existing correlation
+ID reuses it across related stage runs, while every run creates a new `run_id`.
+The values are allowed to be equal. The shared stage names supported by the
+schema are `collection`, `upload`, `grouping`, `ranking`, `labeling`,
+`draft_generation`, and `telegram`.
+
+The existing mode contract is `read_only` or `write`. `read_only` does not
+forbid writing monitoring history; it means that this stage does not write its
+own ranking result to the normal output. `write` means that the step saves or
+sends its result to the intended target, not only a database table.
+
 The execution record stores the run ID, mode, status, timestamps, counters,
 warnings, skipped topic reasons, calculation errors and write errors.
 If execution-history creation cannot be confirmed, ranking aborts before any
@@ -323,6 +336,7 @@ Before live ranking, apply the existing topic-storage migrations in order:
 7. `sql/008_create_topic_status_and_posts.sql`
 8. `sql/009_create_source_registry.sql`
 9. `sql/011_create_pipeline_runs.sql`
+10. `sql/012_add_pipeline_run_correlation.sql`
 
 Migration 006 provides the backend `service_role` access needed by the
 adapter: read access to `news`, `topics`, `topic_articles` and the topic read

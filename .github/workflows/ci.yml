@@ -298,6 +298,16 @@ jobs:
             docker exec -i "$TEST_CONTAINER" \
               psql -X -U postgres -d "$test_database" \
               -v ON_ERROR_STOP=1 < sql/test_pipeline_runs.sql
+
+            echo "Applying pipeline run correlation to $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/012_add_pipeline_run_correlation.sql
+
+            echo "Testing pipeline run correlation in $test_database"
+            docker exec -i "$TEST_CONTAINER" \
+              psql -X -U postgres -d "$test_database" \
+              -v ON_ERROR_STOP=1 < sql/test_pipeline_run_correlation.sql
           done
 
       - name: Test publishing workflow
